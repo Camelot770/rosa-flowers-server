@@ -74,5 +74,5 @@ app.use('/api/admin/settings', adminSettingsRoutes);
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌹 Rosa Flowers server running on port ${PORT}`);
-  startBot();
+  startBot().catch(err => console.error('Bot startup failed:', err));
 });
