@@ -11,14 +11,30 @@ const statusMessages: Record<string, string> = {
   canceled: '❌ Отменён',
 };
 
-export function startBot() {
+export async function startBot() {
   const token = process.env.BOT_TOKEN;
   if (!token || token.startsWith('placeholder')) {
     console.log('⚠️ BOT_TOKEN not set or placeholder, skipping bot start');
     return;
   }
 
+  // Validate token before starting polling
+  const testBot = new TelegramBot(token);
+  try {
+    const me = await testBot.getMe();
+    console.log(`🤖 Bot token valid: @${me.username}`);
+    await testBot.stopPolling();
+  } catch (err: any) {
+    console.error(`❌ Invalid BOT_TOKEN: ${err.message || err}. Skipping bot start.`);
+    return;
+  }
+
   bot = new TelegramBot(token, { polling: true });
+
+  // Handle polling errors silently (log once, don't spam)
+  bot.on('polling_error', (err: any) => {
+    console.error(`Bot polling error: ${err.code || err.message}`);
+  });
 
   // Set commands
   bot.setMyCommands([
