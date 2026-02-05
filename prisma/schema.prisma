@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          Int       @id @default(autoincrement())
+  telegramId  BigInt    @unique
+  firstName   String
+  lastName    String?
+  username    String?
+  phone       String?
+  photoUrl    String?
+  bonusPoints Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  addresses      Address[]
+  orders         Order[]
+  favorites      Favorite[]
+  loyaltyHistory LoyaltyHistory[]
+}
+
+model Address {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  title     String   @default("Дом")
+  street    String
+  house     String
+  apartment String?
+  entrance  String?
+  floor     String?
+  comment   String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+}
+
+model Bouquet {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String
+  price       Int
+  oldPrice    Int?
+  category    String    @default("bouquets")
+  tags        String[]  @default([])
+  inStock     Boolean   @default(true)
+  isHit       Boolean   @default(false)
+  isNew       Boolean   @default(false)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  images     BouquetImage[]
+  favorites  Favorite[]
+  orderItems OrderItem[]
+}
+
+model BouquetImage {
+  id        Int     @id @default(autoincrement())
+  bouquetId Int
+  url       String
+  sortOrder Int     @default(0)
+
+  bouquet Bouquet @relation(fields: [bouquetId], references: [id], onDelete: Cascade)
+}
+
+model Flower {
+  id       Int     @id @default(autoincrement())
+  name     String
+  price    Int
+  imageUrl String?
+  inStock  Boolean @default(true)
+}
+
+model Greenery {
+  id       Int     @id @default(autoincrement())
+  name     String
+  price    Int
+  imageUrl String?
+  inStock  Boolean @default(true)
+}
+
+model Packaging {
+  id       Int     @id @default(autoincrement())
+  name     String
+  price    Int
+  imageUrl String?
+  inStock  Boolean @default(true)
+}
+
+model Order {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  addressId       Int?
+  status          String    @default("new")
+  deliveryType    String    @default("delivery")
+  deliveryDate    String?
+  deliveryTime    String?
+  recipientName   String?
+  recipientPhone  String?
+  comment         String?
+  totalPrice      Int
+  bonusUsed       Int       @default(0)
+  bonusEarned     Int       @default(0)
+  paymentId       String?
+  paymentStatus   String    @default("pending")
+  isAnonymous     Boolean   @default(false)
+  cardText        String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user    User        @relation(fields: [userId], references: [id])
+  address Address?    @relation(fields: [addressId], references: [id])
+  items   OrderItem[]
+}
+
+model OrderItem {
+  id              Int     @id @default(autoincrement())
+  orderId         Int
+  bouquetId       Int?
+  name            String
+  price           Int
+  quantity        Int     @default(1)
+  isConstructor   Boolean @default(false)
+  constructorData String?
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  bouquet Bouquet? @relation(fields: [bouquetId], references: [id])
+}
+
+model Favorite {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  bouquetId Int
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bouquet Bouquet @relation(fields: [bouquetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bouquetId])
+}
+
+model LoyaltyHistory {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  amount      Int
+  type        String   // "earn" | "spend"
+  description String
+  orderId     Int?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AdminUser {
+  id        Int      @id @default(autoincrement())
+  login     String   @unique
+  password  String
+  name      String   @default("Admin")
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
+}
