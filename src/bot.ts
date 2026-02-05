@@ -13,8 +13,8 @@ const statusMessages: Record<string, string> = {
 
 export function startBot() {
   const token = process.env.BOT_TOKEN;
-  if (!token) {
-    console.log('⚠️ BOT_TOKEN not set, skipping bot start');
+  if (!token || token.startsWith('placeholder')) {
+    console.log('⚠️ BOT_TOKEN not set or placeholder, skipping bot start');
     return;
   }
 
