@@ -141,7 +141,7 @@ async function main() {
         name: b.name,
         description: b.description,
         price: b.price,
-        oldPrice: b.oldPrice,
+        oldPrice: (b as any).oldPrice,
         category: b.category,
         tags: b.tags,
         isHit: b.isHit || false,
