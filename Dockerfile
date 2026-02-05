@@ -27,7 +27,7 @@ RUN npx prisma generate
 COPY --from=builder /app/dist ./dist/
 COPY public ./public/
 
-RUN mkdir -p /app/uploads/bouquets /app/uploads/constructor /app/uploads/gallery
+RUN mkdir -p /data/uploads/bouquets /data/uploads/constructor /data/uploads/gallery
 
 EXPOSE 4000
 
