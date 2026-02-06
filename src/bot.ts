@@ -250,3 +250,128 @@ export async function notifyOrderStatus(telegramId: string, orderId: number, sta
     }
   );
 }
+
+// Notify user that order was created successfully
+export async function notifyOrderCreated(
+  telegramId: string,
+  orderId: number,
+  totalPrice: number,
+  itemCount: number,
+  deliveryType: string,
+  bonusEarned: number,
+) {
+  if (!bot) return;
+
+  const webAppUrl = process.env.WEBAPP_URL || 'https://rosa-flowers-client.vercel.app';
+  const deliveryText = deliveryType === 'pickup' ? '🏪 Самовывоз' : '🚗 Доставка';
+  const priceFormatted = totalPrice.toLocaleString('ru-RU');
+
+  await bot.sendMessage(telegramId,
+    `✅ *Заказ оформлен!*\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📋 Заказ *#${orderId}*\n` +
+    `🛒 Позиций: ${itemCount}\n` +
+    `💰 Сумма: *${priceFormatted} ₽*\n` +
+    `${deliveryText}\n\n` +
+    (bonusEarned > 0
+      ? `⭐ После оплаты вам начислится *${bonusEarned} бонусов*!\n\n`
+      : '') +
+    `Ожидайте подтверждения. Мы свяжемся с вами в ближайшее время! 🌹`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📦 Мои заказы', web_app: { url: `${webAppUrl}/orders` } }],
+          [{ text: '💐 Продолжить покупки', web_app: { url: webAppUrl } }],
+        ],
+      },
+    }
+  );
+}
+
+// Notify user that payment was successful
+export async function notifyPaymentSuccess(
+  telegramId: string,
+  orderId: number,
+  totalPrice: number,
+  bonusEarned: number,
+) {
+  if (!bot) return;
+
+  const webAppUrl = process.env.WEBAPP_URL || 'https://rosa-flowers-client.vercel.app';
+  const priceFormatted = totalPrice.toLocaleString('ru-RU');
+
+  await bot.sendMessage(telegramId,
+    `💳 *Оплата получена!*\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📋 Заказ *#${orderId}*\n` +
+    `💰 Оплачено: *${priceFormatted} ₽*\n\n` +
+    (bonusEarned > 0
+      ? `⭐ Начислено *${bonusEarned} бонусов* на ваш счёт!\n\n`
+      : '') +
+    `Мы уже начинаем собирать ваш букет! 💐\n` +
+    `Следите за статусом заказа 👇`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📦 Статус заказа', web_app: { url: `${webAppUrl}/orders` } }],
+        ],
+      },
+    }
+  );
+}
+
+// Notify admin(s) about new order
+export async function notifyAdminNewOrder(
+  orderId: number,
+  customerName: string,
+  totalPrice: number,
+  itemCount: number,
+  deliveryType: string,
+  items: { name: string; quantity: number; price: number }[],
+) {
+  if (!bot) return;
+
+  const adminChatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
+  if (!adminChatId) return;
+
+  const priceFormatted = totalPrice.toLocaleString('ru-RU');
+  const deliveryText = deliveryType === 'pickup' ? '🏪 Самовывоз' : '🚗 Доставка';
+
+  const itemsList = items
+    .slice(0, 5)
+    .map((item) => `  • ${item.name} × ${item.quantity} — ${item.price * item.quantity} ₽`)
+    .join('\n');
+  const moreItems = items.length > 5 ? `\n  _...и ещё ${items.length - 5} поз._` : '';
+
+  await bot.sendMessage(adminChatId,
+    `🔔 *Новый заказ!*\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📋 Заказ *#${orderId}*\n` +
+    `👤 Клиент: ${customerName}\n` +
+    `💰 Сумма: *${priceFormatted} ₽*\n` +
+    `${deliveryText}\n\n` +
+    `🛒 *Состав:*\n${itemsList}${moreItems}`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
+// Notify admin about successful payment
+export async function notifyAdminPayment(orderId: number, totalPrice: number) {
+  if (!bot) return;
+
+  const adminChatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
+  if (!adminChatId) return;
+
+  const priceFormatted = totalPrice.toLocaleString('ru-RU');
+
+  await bot.sendMessage(adminChatId,
+    `💳 *Оплата получена!*\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📋 Заказ *#${orderId}*\n` +
+    `💰 Сумма: *${priceFormatted} ₽*\n\n` +
+    `Пора собирать букет! 💐`,
+    { parse_mode: 'Markdown' }
+  );
+}
