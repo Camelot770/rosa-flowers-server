@@ -28,10 +28,7 @@ const PORT = parseInt(process.env.PORT || '4000', 10);
 
 // Middleware
 app.use(cors({
-  origin: [
-    process.env.WEBAPP_URL || 'http://localhost:5173',
-    process.env.ADMIN_WEBAPP_URL || 'http://localhost:5174',
-  ],
+  origin: true,
   credentials: true,
 }));
 
@@ -42,9 +39,6 @@ app.use(express.json());
 // Static files — uploads
 const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
 app.use('/uploads', express.static(uploadsDir));
-
-// Static files — public (seed images)
-app.use('/public', express.static(path.join(__dirname, '..', 'public')));
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -71,8 +65,28 @@ app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/admin/loyalty', adminLoyaltyRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
 
+// Global error handler
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🌹 Rosa Flowers server running on port ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Rosa Flowers server running on port ${PORT}`);
   startBot().catch(err => console.error('Bot startup failed:', err));
+});
+
+// Graceful shutdown
+const shutdown = async () => {
+  console.log('Shutting down...');
+  server.close();
+  await prisma.$disconnect();
+  process.exit(0);
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
 });
