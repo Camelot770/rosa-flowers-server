@@ -6,6 +6,15 @@ import { upload } from '../middleware/upload';
 const router = Router();
 router.use(adminAuth);
 
+function parseTags(bouquet: any) {
+  try {
+    bouquet.tags = typeof bouquet.tags === 'string' ? JSON.parse(bouquet.tags) : bouquet.tags;
+  } catch {
+    bouquet.tags = [];
+  }
+  return bouquet;
+}
+
 // GET /api/admin/bouquets — все букеты (включая не в наличии)
 router.get('/', async (_req: AdminRequest, res: Response) => {
   try {
@@ -13,7 +22,7 @@ router.get('/', async (_req: AdminRequest, res: Response) => {
       include: { images: { orderBy: { sortOrder: 'asc' } } },
       orderBy: { sortOrder: 'asc' },
     });
-    res.json(bouquets);
+    res.json(bouquets.map(parseTags));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch bouquets' });
   }
@@ -32,7 +41,7 @@ router.post('/', upload.array('images', 10), async (req: AdminRequest, res: Resp
         price: parseInt(price),
         oldPrice: oldPrice ? parseInt(oldPrice) : null,
         category: category || 'bouquets',
-        tags: tags ? JSON.parse(tags) : [],
+        tags: tags || '[]',
         inStock: inStock !== 'false',
         isHit: isHit === 'true',
         isNew: isNew === 'true',
@@ -47,7 +56,7 @@ router.post('/', upload.array('images', 10), async (req: AdminRequest, res: Resp
       include: { images: true },
     });
 
-    res.json(bouquet);
+    res.json(parseTags(bouquet));
   } catch (error) {
     console.error('Error creating bouquet:', error);
     res.status(500).json({ error: 'Failed to create bouquet' });
@@ -58,6 +67,7 @@ router.post('/', upload.array('images', 10), async (req: AdminRequest, res: Resp
 router.put('/:id', upload.array('images', 10), async (req: AdminRequest, res: Response) => {
   try {
     const id = parseInt(String(req.params.id));
+    if (isNaN(id)) { res.status(400).json({ error: 'Invalid bouquet ID' }); return; }
     const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, sortOrder, deleteImages } = req.body;
     const files = req.files as Express.Multer.File[];
 
@@ -75,7 +85,7 @@ router.put('/:id', upload.array('images', 10), async (req: AdminRequest, res: Re
         price: parseInt(price),
         oldPrice: oldPrice ? parseInt(oldPrice) : null,
         category: category || 'bouquets',
-        tags: tags ? JSON.parse(tags) : [],
+        tags: tags || '[]',
         inStock: inStock !== 'false',
         isHit: isHit === 'true',
         isNew: isNew === 'true',
@@ -90,7 +100,7 @@ router.put('/:id', upload.array('images', 10), async (req: AdminRequest, res: Re
       include: { images: { orderBy: { sortOrder: 'asc' } } },
     });
 
-    res.json(bouquet);
+    res.json(parseTags(bouquet));
   } catch (error) {
     res.status(500).json({ error: 'Failed to update bouquet' });
   }
@@ -99,7 +109,13 @@ router.put('/:id', upload.array('images', 10), async (req: AdminRequest, res: Re
 // DELETE /api/admin/bouquets/:id — удалить букет
 router.delete('/:id', async (req: AdminRequest, res: Response) => {
   try {
-    await prisma.bouquet.delete({ where: { id: parseInt(String(req.params.id)) } });
+    const id = parseInt(String(req.params.id));
+    if (isNaN(id)) { res.status(400).json({ error: 'Invalid bouquet ID' }); return; }
+
+    // Unlink from order items and remove favorites before deleting
+    await prisma.orderItem.updateMany({ where: { bouquetId: id }, data: { bouquetId: null } });
+    await prisma.favorite.deleteMany({ where: { bouquetId: id } });
+    await prisma.bouquet.delete({ where: { id } });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete bouquet' });

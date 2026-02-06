@@ -3,19 +3,35 @@ import { prisma } from '../index';
 
 const router = Router();
 
+// Helper: parse tags from JSON string to array
+function parseTags(bouquet: any) {
+  try {
+    bouquet.tags = typeof bouquet.tags === 'string' ? JSON.parse(bouquet.tags) : bouquet.tags;
+  } catch {
+    bouquet.tags = [];
+  }
+  return bouquet;
+}
+
 // GET /api/bouquets — список всех букетов
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, search, sort } = req.query;
+    const { category, search, sort, isHit, isNew } = req.query;
 
     const where: any = { inStock: true };
     if (category && category !== 'all') {
       where.category = category as string;
     }
+    if (isHit === 'true') {
+      where.isHit = true;
+    }
+    if (isNew === 'true') {
+      where.isNew = true;
+    }
     if (search) {
       where.OR = [
-        { name: { contains: search as string, mode: 'insensitive' } },
-        { description: { contains: search as string, mode: 'insensitive' } },
+        { name: { contains: search as string } },
+        { description: { contains: search as string } },
       ];
     }
 
@@ -30,7 +46,7 @@ router.get('/', async (req: Request, res: Response) => {
       include: { images: { orderBy: { sortOrder: 'asc' } } },
     });
 
-    res.json(bouquets);
+    res.json(bouquets.map(parseTags));
   } catch (error) {
     console.error('Error fetching bouquets:', error);
     res.status(500).json({ error: 'Failed to fetch bouquets' });
@@ -54,8 +70,13 @@ router.get('/categories', async (_req: Request, res: Response) => {
 // GET /api/bouquets/:id — один букет
 router.get('/:id', async (req: Request, res: Response) => {
   try {
+    const id = parseInt(String(req.params.id));
+    if (isNaN(id)) {
+      res.status(400).json({ error: 'Invalid bouquet ID' });
+      return;
+    }
     const bouquet = await prisma.bouquet.findUnique({
-      where: { id: parseInt(String(req.params.id)) },
+      where: { id },
       include: { images: { orderBy: { sortOrder: 'asc' } } },
     });
 
@@ -64,7 +85,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    res.json(bouquet);
+    res.json(parseTags(bouquet));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch bouquet' });
   }
