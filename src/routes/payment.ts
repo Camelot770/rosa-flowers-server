@@ -22,7 +22,7 @@ router.post('/create', messengerAuth, async (req: MessengerAuthenticatedRequest,
     const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
-    const { orderId } = req.body;
+    const { orderId, returnUrl } = req.body;
     if (!orderId || isNaN(orderId)) { res.status(400).json({ error: 'Invalid order ID' }); return; }
 
     const order = await prisma.order.findUnique({
@@ -55,6 +55,8 @@ router.post('/create', messengerAuth, async (req: MessengerAuthenticatedRequest,
       orderId,
       `Заказ #${orderId} — Роза цветов`,
       paymentItems,
+      undefined,
+      returnUrl,
     );
 
     await prisma.order.update({
