@@ -16,7 +16,12 @@ export function adminAuth(req: AdminRequest, res: Response, next: NextFunction):
   const token = authHeader.slice(7);
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as { adminId: number };
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      res.status(500).json({ error: 'Server auth not configured' });
+      return;
+    }
+    const payload = jwt.verify(token, jwtSecret) as { adminId: number };
     req.adminId = payload.adminId;
     next();
   } catch {
