@@ -179,7 +179,7 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
 
     // Notify admin about new order with full details
     try {
-      const customerName = mu.firstName + (mu.lastName ? ` ${mu.lastName}` : '') || 'Клиент';
+      const customerName = `${mu.firstName || ''}${mu.lastName ? ' ' + mu.lastName : ''}`.trim() || 'Клиент';
       // Load address for admin notification
       let addressText: string | undefined;
       if (addressId) {
