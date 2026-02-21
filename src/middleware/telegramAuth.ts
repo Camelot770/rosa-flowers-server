@@ -32,7 +32,12 @@ export function telegramAuth(req: AuthenticatedRequest, res: Response, next: Nex
       .map(([key, value]) => `${key}=${value}`)
       .join('\n');
 
-    const botToken = process.env.BOT_TOKEN!;
+    const botToken = process.env.BOT_TOKEN;
+    if (!botToken) {
+      res.status(500).json({ error: 'Server auth not configured' });
+      return;
+    }
+
     const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
     const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
@@ -41,11 +46,24 @@ export function telegramAuth(req: AuthenticatedRequest, res: Response, next: Nex
       return;
     }
 
-    const userStr = params.get('user');
-    if (userStr) {
-      req.telegramUser = JSON.parse(userStr);
+    // Validate auth_date freshness (24 hours)
+    const authDate = params.get('auth_date');
+    if (authDate) {
+      const authTimestamp = parseInt(authDate) * 1000;
+      const now = Date.now();
+      if (now - authTimestamp > 24 * 60 * 60 * 1000) {
+        res.status(401).json({ error: 'Telegram auth data expired' });
+        return;
+      }
     }
 
+    const userStr = params.get('user');
+    if (!userStr) {
+      res.status(401).json({ error: 'Telegram user data required' });
+      return;
+    }
+
+    req.telegramUser = JSON.parse(userStr);
     next();
   } catch (error) {
     res.status(401).json({ error: 'Auth failed' });

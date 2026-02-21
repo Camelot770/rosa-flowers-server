@@ -1,11 +1,23 @@
 import { v4 as uuidv4 } from 'uuid';
 
+interface PaymentItem {
+  name: string;
+  price: number;
+  quantity: number;
+}
+
 interface PaymentResult {
   id: string;
   confirmationUrl: string;
 }
 
-export async function createPayment(amount: number, orderId: number, description: string): Promise<PaymentResult> {
+export async function createPayment(
+  amount: number,
+  orderId: number,
+  description: string,
+  items: PaymentItem[],
+  customerEmail?: string,
+): Promise<PaymentResult> {
   const shopId = process.env.YUKASSA_SHOP_ID;
   const secretKey = process.env.YUKASSA_SECRET_KEY;
 
@@ -14,6 +26,30 @@ export async function createPayment(amount: number, orderId: number, description
   }
 
   const idempotenceKey = uuidv4();
+
+  // Формируем позиции чека
+  const receiptItems = items.map((item) => ({
+    description: item.name.substring(0, 128),
+    quantity: String(item.quantity),
+    amount: {
+      value: item.price.toFixed(2),
+      currency: 'RUB',
+    },
+    vat_code: 1, // Без НДС
+    payment_subject: 'commodity',
+    payment_mode: 'full_payment',
+  }));
+
+  const receipt: any = {
+    items: receiptItems,
+  };
+
+  // ЮKassa требует email или phone в чеке
+  if (customerEmail) {
+    receipt.customer = { email: customerEmail };
+  } else {
+    receipt.customer = { email: 'rozacvetov@list.ru' };
+  }
 
   const response = await fetch('https://api.yookassa.ru/v3/payments', {
     method: 'POST',
@@ -24,7 +60,7 @@ export async function createPayment(amount: number, orderId: number, description
     },
     body: JSON.stringify({
       amount: {
-        value: (amount / 100 * 100).toFixed(2), // amount is in rubles
+        value: amount.toFixed(2),
         currency: 'RUB',
       },
       confirmation: {
@@ -33,6 +69,7 @@ export async function createPayment(amount: number, orderId: number, description
       },
       capture: true,
       description,
+      receipt,
       metadata: {
         orderId: orderId.toString(),
       },
@@ -41,6 +78,7 @@ export async function createPayment(amount: number, orderId: number, description
 
   if (!response.ok) {
     const error = await response.text();
+    console.error('YuKassa API error:', error);
     throw new Error(`YuKassa API error: ${error}`);
   }
 
@@ -50,9 +88,4 @@ export async function createPayment(amount: number, orderId: number, description
     id: data.id,
     confirmationUrl: data.confirmation.confirmation_url,
   };
-}
-
-export async function handleWebhook(body: any) {
-  // Webhook handling is done in the payment route
-  return body;
 }

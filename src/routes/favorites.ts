@@ -1,14 +1,22 @@
 import { Router, Response } from 'express';
 import { prisma } from '../index';
-import { telegramAuth, AuthenticatedRequest } from '../middleware/telegramAuth';
+import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
 
 const router = Router();
 
+// Helper: find user by platform
+async function findUserByPlatform(platform: string, platformId: string) {
+  if (platform === 'telegram') {
+    return prisma.user.findUnique({ where: { telegramId: platformId } });
+  }
+  return prisma.user.findUnique({ where: { maxId: platformId } });
+}
+
 // GET /api/favorites — избранное
-router.get('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: Response) => {
   try {
-    const tgUser = req.telegramUser!;
-    const user = await prisma.user.findUnique({ where: { telegramId: BigInt(tgUser.id) } });
+    const mu = req.messengerUser!;
+    const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const favorites = await prisma.favorite.findMany({
@@ -28,10 +36,10 @@ router.get('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) =
 });
 
 // POST /api/favorites/:bouquetId — добавить в избранное
-router.post('/:bouquetId', telegramAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:bouquetId', messengerAuth, async (req: MessengerAuthenticatedRequest, res: Response) => {
   try {
-    const tgUser = req.telegramUser!;
-    const user = await prisma.user.findUnique({ where: { telegramId: BigInt(tgUser.id) } });
+    const mu = req.messengerUser!;
+    const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const bouquetId = parseInt(String(req.params.bouquetId));
@@ -49,10 +57,10 @@ router.post('/:bouquetId', telegramAuth, async (req: AuthenticatedRequest, res: 
 });
 
 // DELETE /api/favorites/:bouquetId — убрать из избранного
-router.delete('/:bouquetId', telegramAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/:bouquetId', messengerAuth, async (req: MessengerAuthenticatedRequest, res: Response) => {
   try {
-    const tgUser = req.telegramUser!;
-    const user = await prisma.user.findUnique({ where: { telegramId: BigInt(tgUser.id) } });
+    const mu = req.messengerUser!;
+    const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const bouquetId = parseInt(String(req.params.bouquetId));

@@ -16,11 +16,16 @@ function parseTags(bouquet: any) {
 // GET /api/bouquets — список всех букетов
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, search, sort, isHit, isNew } = req.query;
+    const { category, search, sort, isHit, isNew, priceMin, priceMax } = req.query;
 
     const where: any = { inStock: true };
     if (category && category !== 'all') {
       where.category = category as string;
+    }
+    if (priceMin || priceMax) {
+      where.price = {};
+      if (priceMin) where.price.gte = parseInt(priceMin as string);
+      if (priceMax) where.price.lte = parseInt(priceMax as string);
     }
     if (isHit === 'true') {
       where.isHit = true;

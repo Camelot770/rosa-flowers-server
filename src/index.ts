@@ -9,6 +9,7 @@ import { constructorRoutes } from './routes/constructor';
 import { orderRoutes } from './routes/orders';
 import { userRoutes } from './routes/user';
 import { favoriteRoutes } from './routes/favorites';
+import { contactRoutes } from './routes/contact';
 import { adminAuthRoutes } from './routes/adminAuth';
 import { adminBouquetRoutes } from './routes/adminBouquets';
 import { adminConstructorRoutes } from './routes/adminConstructor';
@@ -16,11 +17,14 @@ import { adminOrderRoutes } from './routes/adminOrders';
 import { adminAnalyticsRoutes } from './routes/adminAnalytics';
 import { adminLoyaltyRoutes } from './routes/adminLoyalty';
 import { adminSettingsRoutes } from './routes/adminSettings';
+import { adminUserRoutes } from './routes/adminUsers';
+import { adminBroadcastRoutes } from './routes/adminBroadcast';
 import { settingsRoutes } from './routes/settings';
 import { paymentRoutes } from './routes/payment';
 
-// Bot
+// Bots
 import { startBot } from './bot';
+import { startMaxBot } from './maxBot';
 
 export const prisma = new PrismaClient();
 const app = express();
@@ -55,6 +59,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/favorites', favoriteRoutes);
+app.use('/api/contact', contactRoutes);
 
 // Admin routes
 app.use('/api/admin/auth', adminAuthRoutes);
@@ -64,6 +69,8 @@ app.use('/api/admin/orders', adminOrderRoutes);
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/admin/loyalty', adminLoyaltyRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
+app.use('/api/admin/users', adminUserRoutes);
+app.use('/api/admin/broadcast', adminBroadcastRoutes);
 
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -74,7 +81,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 // Start server
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Rosa Flowers server running on port ${PORT}`);
-  startBot().catch(err => console.error('Bot startup failed:', err));
+  startBot().catch(err => console.error('Telegram bot startup failed:', err));
+  startMaxBot().catch(err => console.error('Max bot startup failed:', err));
 });
 
 // Graceful shutdown

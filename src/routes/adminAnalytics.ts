@@ -17,7 +17,8 @@ router.get('/', async (_req: AdminRequest, res: Response) => {
       totalOrders,
       todayOrders,
       monthOrders,
-      totalUsers,
+      totalCustomers,
+      totalBouquets,
       totalRevenue,
       monthRevenue,
       ordersByStatus,
@@ -27,6 +28,7 @@ router.get('/', async (_req: AdminRequest, res: Response) => {
       prisma.order.count({ where: { createdAt: { gte: today } } }),
       prisma.order.count({ where: { createdAt: { gte: monthStart } } }),
       prisma.user.count(),
+      prisma.bouquet.count(),
       prisma.order.aggregate({
         _sum: { totalPrice: true },
         where: { paymentStatus: 'paid' },
@@ -53,24 +55,43 @@ router.get('/', async (_req: AdminRequest, res: Response) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const revenueByDay = await prisma.$queryRawUnsafe<{ date: string; revenue: number }[]>(
-      `SELECT DATE(\"createdAt\") as date, SUM("totalPrice") as revenue
+      `SELECT DATE(createdAt) as date, SUM(totalPrice) as revenue
        FROM "Order"
-       WHERE "paymentStatus" = 'paid' AND "createdAt" >= $1
-       GROUP BY DATE("createdAt")
+       WHERE paymentStatus = 'paid' AND createdAt >= ?
+       GROUP BY DATE(createdAt)
        ORDER BY date ASC`,
-      thirtyDaysAgo
+      thirtyDaysAgo.toISOString()
     );
+
+    // Recent orders
+    const recentOrders = await prisma.order.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+      },
+    });
 
     res.json({
       totalOrders,
       todayOrders,
       monthOrders,
-      totalUsers,
+      totalUsers: totalCustomers,
+      totalCustomers,
+      totalBouquets,
       totalRevenue: totalRevenue._sum.totalPrice || 0,
       monthRevenue: monthRevenue._sum.totalPrice || 0,
       ordersByStatus: ordersByStatus.map((s) => ({ status: s.status, count: s._count })),
       topBouquets: topBouquets.map((b) => ({ name: b.name, count: b._sum.quantity || 0 })),
-      revenueByDay: revenueByDay.map((r) => ({ date: r.date, revenue: Number(r.revenue) })),
+      revenueByDay: (revenueByDay || []).map((r) => ({ date: String(r.date), revenue: Number(r.revenue) || 0 })),
+      recentOrders: recentOrders.map((o) => ({
+        id: o.id,
+        status: o.status,
+        totalPrice: o.totalPrice,
+        paymentStatus: o.paymentStatus,
+        customerName: [o.user.firstName, o.user.lastName].filter(Boolean).join(' '),
+        createdAt: o.createdAt,
+      })),
     });
   } catch (error) {
     console.error('Analytics error:', error);
