@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../index';
 import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
-import { notifyOrderCreated, notifyAdminNewOrder } from '../notifications';
+import { notifyOrderCreated } from '../notifications';
 
 const router = Router();
 
@@ -177,36 +177,7 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
       console.error('Failed to notify client about order:', e);
     }
 
-    // Notify admin about new order with full details
-    try {
-      const customerName = `${mu.firstName || ''}${mu.lastName ? ' ' + mu.lastName : ''}`.trim() || 'Клиент';
-      // Load address for admin notification
-      let addressText: string | undefined;
-      if (addressId) {
-        const addr = await prisma.address.findUnique({ where: { id: addressId } });
-        if (addr) {
-          addressText = `${addr.street}, ${addr.house}${addr.apartment ? ', кв. ' + addr.apartment : ''}`;
-        }
-      }
-      await notifyAdminNewOrder(
-        order.id,
-        customerName,
-        totalPrice,
-        items.length,
-        deliveryType || 'delivery',
-        items.map((item: any) => ({ name: item.name, quantity: item.quantity, price: item.price })),
-        mu.platform,
-        deliveryDate,
-        deliveryTime,
-        addressText,
-        recipientName,
-        recipientPhone,
-        actualBonusUsed,
-        bonusEarned,
-      );
-    } catch (e) {
-      console.error('Failed to notify admin about order:', e);
-    }
+    // Admin notification moved to payment webhook — admins are notified only after successful payment
 
     // Fix 1.7: Return 201 for created order
     res.status(201).json(order);
