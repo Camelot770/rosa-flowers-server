@@ -9,7 +9,6 @@ router.use(adminAuth);
 router.get('/', async (_req: AdminRequest, res: Response) => {
   try {
     const users = await prisma.user.findMany({
-      where: { bonusPoints: { gt: 0 } },
       select: {
         id: true,
         firstName: true,
@@ -18,11 +17,12 @@ router.get('/', async (_req: AdminRequest, res: Response) => {
         phone: true,
         bonusPoints: true,
         telegramId: true,
+        maxId: true,
       },
       orderBy: { bonusPoints: 'desc' },
     });
 
-    res.json(users.map((u) => ({ ...u, telegramId: u.telegramId.toString() })));
+    res.json(users.map((u) => ({ ...u, telegramId: u.telegramId || null, maxId: u.maxId || null })));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch loyalty data' });
   }
@@ -54,19 +54,34 @@ router.post('/:userId/adjust', async (req: AdminRequest, res: Response) => {
     const userId = parseInt(String(req.params.userId));
     const { amount, description } = req.body;
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { bonusPoints: { increment: amount } },
-    });
+    if (typeof amount !== 'number' || amount === 0 || isNaN(amount)) {
+      res.status(400).json({ error: 'Amount must be a non-zero number' });
+      return;
+    }
 
-    await prisma.loyaltyHistory.create({
-      data: {
-        userId,
-        amount,
-        type: amount > 0 ? 'earn' : 'spend',
-        description: description || 'Ручная корректировка',
-      },
-    });
+    // Check balance won't go negative
+    if (amount < 0) {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { bonusPoints: true } });
+      if (!user || user.bonusPoints + amount < 0) {
+        res.status(400).json({ error: 'Insufficient bonus points' });
+        return;
+      }
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { bonusPoints: { increment: amount } },
+      }),
+      prisma.loyaltyHistory.create({
+        data: {
+          userId,
+          amount,
+          type: amount > 0 ? 'earn' : 'spend',
+          description: description || 'Ручная корректировка',
+        },
+      }),
+    ]);
 
     res.json({ success: true });
   } catch (error) {

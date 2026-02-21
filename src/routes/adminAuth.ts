@@ -23,7 +23,12 @@ router.post('/login', async (req: Request, res: Response) => {
       return;
     }
 
-    const token = jwt.sign({ adminId: admin.id }, process.env.JWT_SECRET!, { expiresIn: '7d' });
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      res.status(500).json({ error: 'Server auth not configured' });
+      return;
+    }
+    const token = jwt.sign({ adminId: admin.id }, jwtSecret, { expiresIn: '7d' });
 
     res.json({ token, admin: { id: admin.id, login: admin.login, name: admin.name } });
   } catch (error) {

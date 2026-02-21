@@ -1,15 +1,23 @@
 import { Router, Response } from 'express';
 import { prisma } from '../index';
-import { telegramAuth, AuthenticatedRequest } from '../middleware/telegramAuth';
-import { notifyOrderCreated, notifyAdminNewOrder } from '../bot';
+import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
+import { notifyOrderCreated, notifyAdminNewOrder } from '../notifications';
 
 const router = Router();
 
+// Helper: find user by platform
+async function findUserByPlatform(platform: string, platformId: string) {
+  if (platform === 'telegram') {
+    return prisma.user.findUnique({ where: { telegramId: platformId } });
+  }
+  return prisma.user.findUnique({ where: { maxId: platformId } });
+}
+
 // GET /api/orders — мои заказы
-router.get('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: Response) => {
   try {
-    const tgUser = req.telegramUser!;
-    const user = await prisma.user.findUnique({ where: { telegramId: String(tgUser.id) } });
+    const mu = req.messengerUser!;
+    const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const orders = await prisma.order.findMany({
@@ -25,10 +33,10 @@ router.get('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) =
 });
 
 // POST /api/orders — создать заказ
-router.post('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: Response) => {
   try {
-    const tgUser = req.telegramUser!;
-    const user = await prisma.user.findUnique({ where: { telegramId: String(tgUser.id) } });
+    const mu = req.messengerUser!;
+    const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const {
@@ -92,8 +100,8 @@ router.post('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) 
     const settings = await prisma.setting.findMany({
       where: { key: { in: ['delivery_price', 'free_delivery_from'] } },
     });
-    const deliveryPrice = parseInt(settings.find((s) => s.key === 'delivery_price')?.value || '300');
-    const freeFrom = parseInt(settings.find((s) => s.key === 'free_delivery_from')?.value || '3000');
+    const deliveryPrice = parseInt(settings.find((s) => s.key === 'delivery_price')?.value || '500');
+    const freeFrom = parseInt(settings.find((s) => s.key === 'free_delivery_from')?.value || '5000');
 
     if (deliveryType === 'delivery' && totalPrice < freeFrom) {
       totalPrice += deliveryPrice;
@@ -155,10 +163,10 @@ router.post('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) 
       return newOrder;
     });
 
-    // Notify client about successful order
+    // Notify client about successful order (via correct platform)
     try {
       await notifyOrderCreated(
-        String(tgUser.id),
+        user.id,
         order.id,
         totalPrice,
         items.length,
@@ -169,9 +177,17 @@ router.post('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) 
       console.error('Failed to notify client about order:', e);
     }
 
-    // Notify admin about new order
+    // Notify admin about new order with full details
     try {
-      const customerName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') || 'Клиент';
+      const customerName = mu.firstName + (mu.lastName ? ` ${mu.lastName}` : '') || 'Клиент';
+      // Load address for admin notification
+      let addressText: string | undefined;
+      if (addressId) {
+        const addr = await prisma.address.findUnique({ where: { id: addressId } });
+        if (addr) {
+          addressText = `${addr.street}, ${addr.house}${addr.apartment ? ', кв. ' + addr.apartment : ''}`;
+        }
+      }
       await notifyAdminNewOrder(
         order.id,
         customerName,
@@ -179,6 +195,14 @@ router.post('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) 
         items.length,
         deliveryType || 'delivery',
         items.map((item: any) => ({ name: item.name, quantity: item.quantity, price: item.price })),
+        mu.platform,
+        deliveryDate,
+        deliveryTime,
+        addressText,
+        recipientName,
+        recipientPhone,
+        actualBonusUsed,
+        bonusEarned,
       );
     } catch (e) {
       console.error('Failed to notify admin about order:', e);
@@ -194,10 +218,10 @@ router.post('/', telegramAuth, async (req: AuthenticatedRequest, res: Response) 
 
 // GET /api/orders/:id — один заказ
 // Fix 1.6: IDOR fix — add ownership check
-router.get('/:id', telegramAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:id', messengerAuth, async (req: MessengerAuthenticatedRequest, res: Response) => {
   try {
-    const tgUser = req.telegramUser!;
-    const user = await prisma.user.findUnique({ where: { telegramId: String(tgUser.id) } });
+    const mu = req.messengerUser!;
+    const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const id = parseInt(String(req.params.id));

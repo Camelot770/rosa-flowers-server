@@ -50,8 +50,9 @@ export async function startBot() {
   // Set bot description (shown before user starts the bot)
   bot.setMyDescription({
     description:
-      '🌹 Роза цветов — студия флористики в Казани\n\n' +
-      '💐 Свежие букеты с доставкой по городу\n' +
+      '🌹 Роза цветов — студия стабилизированной флористики\n\n' +
+      '💐 Живые цветы, которые не вянут\n' +
+      '🌸 Букеты, которые остаются надолго\n' +
       '⭐ Бонусная программа — кэшбэк 5% с каждого заказа\n\n' +
       '📍 д. Званка, ул. Приозёрная, д. 58\n' +
       '🕐 Ежедневно 9:00 – 21:00\n\n' +
@@ -61,7 +62,7 @@ export async function startBot() {
   // Short description (shown in profile and search results)
   bot.setMyShortDescription({
     short_description:
-      '🌹 Студия флористики — букеты с доставкой по Казани. Бонусная программа.',
+      '🌹 Студия стабилизированной флористики — живые цветы, которые не вянут. Доставка по городу.',
   }).catch(() => {});
 
   // /start
@@ -71,10 +72,10 @@ export async function startBot() {
       `🌷 *Добро пожаловать в Роза цветов!*\n` +
       `━━━━━━━━━━━━━━━━━━━━\n\n` +
       `Привет, *${name}*! 🤗\n\n` +
-      `Мы — студия флористики, создаём букеты с любовью и доставляем с заботой.\n\n` +
+      `Мы — студия стабилизированной флористики. Живые цветы, которые не вянут. Букеты, которые остаются надолго.\n\n` +
       `✨ *Что мы предлагаем:*\n` +
-      `├ 💐 Букеты на любой повод\n` +
-      `├ 🚗 Доставка по городу за 1–2 часа\n` +
+      `├ 💐 Стабилизированные композиции\n` +
+      `├ 🚗 Доставка по городу за 1–3 часа\n` +
       `└ ⭐ Кэшбэк 5% бонусами с каждого заказа\n\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `📍 д. Званка, ул. Приозёрная, д. 58\n` +
@@ -101,8 +102,8 @@ export async function startBot() {
   // /catalog
   bot.onText(/\/catalog/, (msg) => {
     bot.sendMessage(msg.chat.id,
-      '💐 *Каталог букетов*\n\n' +
-      'Розы, тюльпаны, пионы, экзотика и авторские композиции — выбирайте!',
+      '💐 *Каталог композиций*\n\n' +
+      'Стабилизированные букеты — живые цветы, которые не вянут. Выбирайте!',
       {
         parse_mode: 'Markdown',
         reply_markup: {
@@ -156,14 +157,15 @@ export async function startBot() {
   const helpText =
     '❓ *Помощь — Роза цветов*\n' +
     '━━━━━━━━━━━━━━━━━━━━\n\n' +
-    '🌹 Студия флористики в Казани\n\n' +
+    '🌹 Студия стабилизированной флористики\n' +
+    '🌸 Живые цветы, которые не вянут\n\n' +
     '📍 *Адрес:* д. Званка, ул. Приозёрная, д. 58\n' +
     '📞 *Телефон:* +7 917 876-59-58\n' +
     '📧 *Email:* rozacvetov@list.ru\n' +
     '🕐 *Режим работы:* ежедневно 9:00 – 21:00\n\n' +
     '🚗 *Доставка:*\n' +
-    '├ По городу — 300₽\n' +
-    '└ Бесплатно от 3 000₽\n\n' +
+    '├ По городу — 500₽ (1–3 часа)\n' +
+    '└ Бесплатно от 5 000₽\n\n' +
     '🤖 *Команды бота:*\n' +
     '├ /start — Главное меню\n' +
     '├ /catalog — Каталог букетов\n' +
@@ -205,28 +207,92 @@ export async function startBot() {
   console.log('🤖 Telegram bot started');
 }
 
-// Notify user about order status change
+// Notify user about order status change with beautiful per-status messages
 export async function notifyOrderStatus(telegramId: string, orderId: number, status: string) {
   if (!bot) return;
 
-  const statusText = statusMessages[status] || status;
   const webAppUrl = process.env.WEBAPP_URL || 'https://rosa-flowers-client.vercel.app';
 
-  await bot.sendMessage(telegramId,
-    `🌹 *Роза цветов*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `📋 Заказ *#${orderId}*\n` +
-    `📌 Статус: ${statusText}\n\n` +
-    `Спасибо, что выбираете нас! 💐`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '📦 Посмотреть заказ', web_app: { url: `${webAppUrl}/orders` } }],
-        ],
-      },
-    }
-  );
+  const statusTemplates: Record<string, { title: string; body: string; buttonText: string }> = {
+    confirmed: {
+      title: '✅ Заказ подтверждён!',
+      body:
+        `Отличные новости! Ваш заказ *#${orderId}* подтверждён.\n\n` +
+        `🌸 Мы уже готовимся к его сборке.\n` +
+        `📞 Если нужно что-то уточнить — свяжитесь с нами.`,
+      buttonText: '📦 Детали заказа',
+    },
+    preparing: {
+      title: '💐 Собираем ваш букет!',
+      body:
+        `Ваш заказ *#${orderId}* уже в работе!\n\n` +
+        `🎨 Наш флорист с любовью собирает композицию специально для вас.\n` +
+        `⏱ Совсем скоро он будет готов!`,
+      buttonText: '📦 Следить за заказом',
+    },
+    delivering: {
+      title: '🚗 Заказ в пути!',
+      body:
+        `Ваш заказ *#${orderId}* уже едет!\n\n` +
+        `📍 Курьер выехал и скоро будет по указанному адресу.\n` +
+        `🌹 Подготовьтесь к приятному сюрпризу!`,
+      buttonText: '📦 Отследить заказ',
+    },
+    completed: {
+      title: '🎉 Заказ доставлен!',
+      body:
+        `Ваш заказ *#${orderId}* успешно выполнен!\n\n` +
+        `💐 Надеемся, букет принесёт радость и улыбки!\n` +
+        `⭐ Не забудьте, что с каждого заказа вы получаете бонусы.\n\n` +
+        `Спасибо, что выбираете *Роза цветов*! 🌹`,
+      buttonText: '💐 Заказать ещё',
+    },
+    canceled: {
+      title: '❌ Заказ отменён',
+      body:
+        `Ваш заказ *#${orderId}* был отменён.\n\n` +
+        `Если это произошло по ошибке или у вас есть вопросы — свяжитесь с нами:\n` +
+        `📞 +7 917 876-59-58\n\n` +
+        `Мы всегда рады помочь! 🌸`,
+      buttonText: '💐 Новый заказ',
+    },
+  };
+
+  const template = statusTemplates[status];
+
+  if (template) {
+    await bot.sendMessage(telegramId,
+      `${template.title}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      template.body,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: template.buttonText, web_app: { url: `${webAppUrl}/orders` } }],
+          ],
+        },
+      }
+    );
+  } else {
+    // Fallback for unknown statuses
+    const statusText = statusMessages[status] || status;
+    await bot.sendMessage(telegramId,
+      `🌹 *Роза цветов*\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📋 Заказ *#${orderId}*\n` +
+      `📌 Статус: ${statusText}\n\n` +
+      `Спасибо, что выбираете нас! 💐`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📦 Посмотреть заказ', web_app: { url: `${webAppUrl}/orders` } }],
+          ],
+        },
+      }
+    );
+  }
 }
 
 // Notify user that order was created successfully
@@ -267,40 +333,97 @@ export async function notifyOrderCreated(
   );
 }
 
-// Notify user that payment was successful
+// Order item for detailed notifications
+interface OrderItemInfo {
+  name: string;
+  price: number;
+  quantity: number;
+}
+
+// Notify user that payment was successful with full order details
 export async function notifyPaymentSuccess(
   telegramId: string,
   orderId: number,
   totalPrice: number,
   bonusEarned: number,
+  items?: OrderItemInfo[],
+  deliveryType?: string,
+  deliveryDate?: string,
+  deliveryTime?: string,
+  address?: string,
+  recipientName?: string,
 ) {
   if (!bot) return;
 
   const webAppUrl = process.env.WEBAPP_URL || 'https://rosa-flowers-client.vercel.app';
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
 
-  await bot.sendMessage(telegramId,
-    `💳 *Оплата получена!*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `📋 Заказ *#${orderId}*\n` +
-    `💰 Оплачено: *${priceFormatted} ₽*\n\n` +
-    (bonusEarned > 0
-      ? `⭐ Начислено *${bonusEarned} бонусов* на ваш счёт!\n\n`
-      : '') +
-    `Мы уже начинаем собирать ваш букет! 💐\n` +
-    `Следите за статусом заказа 👇`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '📦 Статус заказа', web_app: { url: `${webAppUrl}/orders` } }],
-        ],
-      },
+  let text = `💳 *Оплата получена!*\n━━━━━━━━━━━━━━━━━━━━\n\n📋 Заказ *#${orderId}*\n`;
+
+  // Состав заказа
+  if (items && items.length > 0) {
+    text += `\n🛒 *Состав заказа:*\n`;
+    for (const item of items) {
+      const itemTotal = item.price * item.quantity;
+      text += `  • ${item.name}`;
+      if (item.quantity > 1) text += ` ×${item.quantity}`;
+      text += ` — ${itemTotal.toLocaleString('ru-RU')} ₽\n`;
     }
-  );
+  }
+
+  text += `\n💰 *Итого: ${priceFormatted} ₽*\n`;
+
+  // Доставка
+  if (deliveryType === 'delivery') {
+    text += `\n🚗 Доставка`;
+    if (address) text += `: ${address}`;
+    text += `\n`;
+  } else if (deliveryType === 'pickup') {
+    text += `\n🏪 Самовывоз\n`;
+  }
+
+  if (deliveryDate) {
+    text += `📅 ${deliveryDate}`;
+    if (deliveryTime) text += `, ${deliveryTime}`;
+    text += `\n`;
+  }
+
+  if (recipientName) {
+    text += `👤 Получатель: ${recipientName}\n`;
+  }
+
+  if (bonusEarned > 0) {
+    text += `\n⭐ Начислено *${bonusEarned} бонусов* на ваш счёт!\n`;
+  }
+
+  text += `\nМы уже начинаем собирать ваш букет! 💐\nСледите за статусом заказа 👇`;
+
+  await bot.sendMessage(telegramId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📦 Статус заказа', web_app: { url: `${webAppUrl}/orders` } }],
+      ],
+    },
+  });
 }
 
-// Notify admin(s) about new order
+// Admin Telegram IDs for order notifications
+const ADMIN_IDS = ['5598055475', '736051965'];
+
+// Helper: send message to all admins
+async function sendToAllAdmins(text: string) {
+  if (!bot) return;
+  for (const adminId of ADMIN_IDS) {
+    try {
+      await bot.sendMessage(adminId, text, { parse_mode: 'Markdown' });
+    } catch (e) {
+      console.error(`Failed to send admin notification to ${adminId}:`, e);
+    }
+  }
+}
+
+// Notify admin(s) about new order with full details
 export async function notifyAdminNewOrder(
   orderId: number,
   customerName: string,
@@ -308,48 +431,160 @@ export async function notifyAdminNewOrder(
   itemCount: number,
   deliveryType: string,
   items: { name: string; quantity: number; price: number }[],
+  platform?: string,
+  deliveryDate?: string,
+  deliveryTime?: string,
+  address?: string,
+  recipientName?: string,
+  recipientPhone?: string,
+  bonusUsed?: number,
+  bonusEarned?: number,
 ) {
-  if (!bot) return;
-
-  const adminChatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
-  if (!adminChatId) return;
-
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
   const deliveryText = deliveryType === 'pickup' ? '🏪 Самовывоз' : '🚗 Доставка';
+  const platformText = platform === 'max' ? '📱 Max' : '📱 Telegram';
 
-  const itemsList = items
-    .slice(0, 5)
-    .map((item) => `  • ${item.name} × ${item.quantity} — ${item.price * item.quantity} ₽`)
-    .join('\n');
-  const moreItems = items.length > 5 ? `\n  _...и ещё ${items.length - 5} поз._` : '';
+  let text = `🔔 *Новый заказ!*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+  text += `📋 Заказ *#${orderId}*\n`;
+  text += `${platformText}\n`;
+  text += `👤 Клиент: ${customerName}\n`;
+  text += `💰 Сумма: *${priceFormatted} ₽*\n`;
+  text += `${deliveryText}\n`;
 
-  await bot.sendMessage(adminChatId,
-    `🔔 *Новый заказ!*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `📋 Заказ *#${orderId}*\n` +
-    `👤 Клиент: ${customerName}\n` +
-    `💰 Сумма: *${priceFormatted} ₽*\n` +
-    `${deliveryText}\n\n` +
-    `🛒 *Состав:*\n${itemsList}${moreItems}`,
-    { parse_mode: 'Markdown' }
-  );
+  // Состав заказа
+  if (items && items.length > 0) {
+    text += `\n🛒 *Состав заказа:*\n`;
+    for (const item of items) {
+      const itemTotal = item.price * item.quantity;
+      text += `  • ${item.name}`;
+      if (item.quantity > 1) text += ` ×${item.quantity}`;
+      text += ` — ${itemTotal.toLocaleString('ru-RU')} ₽\n`;
+    }
+  }
+
+  // Доставка
+  if (deliveryType === 'delivery' && address) {
+    text += `\n📍 Адрес: ${address}\n`;
+  }
+  if (deliveryDate) {
+    text += `📅 ${deliveryDate}`;
+    if (deliveryTime) text += `, ${deliveryTime}`;
+    text += `\n`;
+  }
+  if (recipientName) {
+    text += `🎁 Получатель: ${recipientName}\n`;
+  }
+  if (recipientPhone) {
+    text += `📞 Телефон: ${recipientPhone}\n`;
+  }
+  if (bonusUsed && bonusUsed > 0) {
+    text += `🔻 Списано бонусов: ${bonusUsed}\n`;
+  }
+  if (bonusEarned && bonusEarned > 0) {
+    text += `⭐ Начислится бонусов: ${bonusEarned}\n`;
+  }
+
+  await sendToAllAdmins(text);
 }
 
-// Notify admin about successful payment
-export async function notifyAdminPayment(orderId: number, totalPrice: number) {
-  if (!bot) return;
-
-  const adminChatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
-  if (!adminChatId) return;
-
+// Notify admin about successful payment with full order details
+export async function notifyAdminPayment(
+  orderId: number,
+  totalPrice: number,
+  items?: OrderItemInfo[],
+  deliveryType?: string,
+  deliveryDate?: string,
+  deliveryTime?: string,
+  address?: string,
+  recipientName?: string,
+  customerName?: string,
+  platform?: string,
+  bonusEarned?: number,
+) {
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
+  const platformText = platform === 'max' ? '📱 Max' : '📱 Telegram';
 
-  await bot.sendMessage(adminChatId,
-    `💳 *Оплата получена!*\n` +
+  let text = `💳 *Оплата получена!*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+  text += `📋 Заказ *#${orderId}*\n`;
+  text += `${platformText}\n`;
+  if (customerName) text += `👤 Клиент: ${customerName}\n`;
+  text += `💰 Сумма: *${priceFormatted} ₽*\n`;
+
+  // Состав заказа
+  if (items && items.length > 0) {
+    text += `\n🛒 *Состав заказа:*\n`;
+    for (const item of items) {
+      const itemTotal = item.price * item.quantity;
+      text += `  • ${item.name}`;
+      if (item.quantity > 1) text += ` ×${item.quantity}`;
+      text += ` — ${itemTotal.toLocaleString('ru-RU')} ₽\n`;
+    }
+  }
+
+  // Доставка
+  if (deliveryType === 'delivery') {
+    text += `\n🚗 Доставка`;
+    if (address) text += `: ${address}`;
+    text += `\n`;
+  } else if (deliveryType === 'pickup') {
+    text += `\n🏪 Самовывоз\n`;
+  }
+
+  if (deliveryDate) {
+    text += `📅 ${deliveryDate}`;
+    if (deliveryTime) text += `, ${deliveryTime}`;
+    text += `\n`;
+  }
+  if (recipientName) {
+    text += `🎁 Получатель: ${recipientName}\n`;
+  }
+  if (bonusEarned && bonusEarned > 0) {
+    text += `⭐ Начислено бонусов: ${bonusEarned}\n`;
+  }
+
+  text += `\nПора собирать букет! 💐`;
+
+  await sendToAllAdmins(text);
+}
+
+// Notify admin about contact message from client
+export async function notifyAdminContactMessage(
+  senderName: string,
+  senderUsername: string | null,
+  telegramId: string,
+  message: string,
+) {
+  const usernameText = senderUsername ? ` (@${senderUsername})` : '';
+
+  const text =
+    `💬 *Сообщение от клиента*\n` +
     `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `📋 Заказ *#${orderId}*\n` +
-    `💰 Сумма: *${priceFormatted} ₽*\n\n` +
-    `Пора собирать букет! 💐`,
-    { parse_mode: 'Markdown' }
-  );
+    `👤 ${senderName}${usernameText}\n` +
+    `🆔 ID: ${telegramId}\n\n` +
+    `📝 *Сообщение:*\n${message}`;
+
+  await sendToAllAdmins(text);
+}
+
+// Broadcast message to all users
+export async function broadcastMessage(
+  telegramIds: string[],
+  message: string,
+): Promise<{ sent: number; failed: number }> {
+  if (!bot) return { sent: 0, failed: 0 };
+
+  let sent = 0;
+  let failed = 0;
+
+  for (const telegramId of telegramIds) {
+    try {
+      await bot.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
+      sent++;
+    } catch (err) {
+      console.error(`Failed to send broadcast to ${telegramId}:`, err);
+      failed++;
+    }
+  }
+
+  return { sent, failed };
 }
