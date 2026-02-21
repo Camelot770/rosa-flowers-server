@@ -17,6 +17,7 @@ export async function createPayment(
   description: string,
   items: PaymentItem[],
   customerEmail?: string,
+  returnUrl?: string,
 ): Promise<PaymentResult> {
   const shopId = process.env.YUKASSA_SHOP_ID;
   const secretKey = process.env.YUKASSA_SECRET_KEY;
@@ -65,7 +66,7 @@ export async function createPayment(
       },
       confirmation: {
         type: 'redirect',
-        return_url: process.env.YUKASSA_RETURN_URL || `${process.env.WEBAPP_URL}/orders`,
+        return_url: returnUrl || process.env.YUKASSA_RETURN_URL || `${process.env.WEBAPP_URL}/orders`,
       },
       capture: true,
       description,
