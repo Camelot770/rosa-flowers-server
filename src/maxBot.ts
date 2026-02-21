@@ -1,5 +1,11 @@
 import { Bot, Keyboard, Context } from '@maxhub/max-bot-api';
 
+// Helper: create an open_app button (opens Mini App inside Max, not external browser).
+// The SDK v0.2.2 doesn't have this type yet, but the Max Bot API supports it.
+function openAppButton(text: string, url: string): any {
+  return { type: 'open_app', text, web_app: url };
+}
+
 let maxBot: Bot | null = null;
 
 export function getMaxBot(): Bot | null {
@@ -35,10 +41,10 @@ export async function startMaxBot() {
       {
         attachments: [
           Keyboard.inlineKeyboard([
-            [Keyboard.button.link('Открыть магазин', webAppUrl)],
+            [openAppButton('Открыть магазин', webAppUrl)],
             [
-              Keyboard.button.link('Заказы', `${webAppUrl}/orders`),
-              Keyboard.button.link('Бонусы', `${webAppUrl}/profile`),
+              openAppButton('Заказы', `${webAppUrl}/orders`),
+              openAppButton('Бонусы', `${webAppUrl}/profile`),
             ],
             [Keyboard.button.callback('Помощь', 'help')],
           ]),
@@ -55,7 +61,7 @@ export async function startMaxBot() {
       {
         attachments: [
           Keyboard.inlineKeyboard([
-            [Keyboard.button.link('Открыть каталог', webAppUrl)],
+            [openAppButton('Открыть каталог', webAppUrl)],
           ]),
         ],
       },
@@ -70,7 +76,7 @@ export async function startMaxBot() {
       {
         attachments: [
           Keyboard.inlineKeyboard([
-            [Keyboard.button.link('Посмотреть заказы', `${webAppUrl}/orders`)],
+            [openAppButton('Посмотреть заказы', `${webAppUrl}/orders`)],
           ]),
         ],
       },
@@ -89,7 +95,7 @@ export async function startMaxBot() {
       {
         attachments: [
           Keyboard.inlineKeyboard([
-            [Keyboard.button.link('Мой профиль', `${webAppUrl}/profile`)],
+            [openAppButton('Мой профиль', `${webAppUrl}/profile`)],
           ]),
         ],
       },
@@ -137,7 +143,7 @@ export async function startMaxBot() {
         {
           attachments: [
             Keyboard.inlineKeyboard([
-              [Keyboard.button.link('Открыть магазин', webAppUrl)],
+              [openAppButton('Открыть магазин', webAppUrl)],
             ]),
           ],
         },
@@ -199,7 +205,7 @@ export async function maxNotifyOrderStatus(maxId: string, orderId: number, statu
     await maxBot.api.sendMessageToUser(Number(maxId), text, {
       attachments: [
         Keyboard.inlineKeyboard([
-          [Keyboard.button.link(btnText, `${webAppUrl}/orders`)],
+          [openAppButton(btnText, `${webAppUrl}/orders`)],
         ]),
       ],
     });
@@ -235,8 +241,8 @@ export async function maxNotifyOrderCreated(
     await maxBot.api.sendMessageToUser(Number(maxId), text, {
       attachments: [
         Keyboard.inlineKeyboard([
-          [Keyboard.button.link('Мои заказы', `${webAppUrl}/orders`)],
-          [Keyboard.button.link('Продолжить покупки', webAppUrl)],
+          [openAppButton('Мои заказы', `${webAppUrl}/orders`)],
+          [openAppButton('Продолжить покупки', webAppUrl)],
         ]),
       ],
     });
@@ -312,7 +318,7 @@ export async function maxNotifyPaymentSuccess(
     await maxBot.api.sendMessageToUser(Number(maxId), text, {
       attachments: [
         Keyboard.inlineKeyboard([
-          [Keyboard.button.link('Статус заказа', `${webAppUrl}/orders`)],
+          [openAppButton('Статус заказа', `${webAppUrl}/orders`)],
         ]),
       ],
     });
