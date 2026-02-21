@@ -51,7 +51,7 @@ export function maxAuth(req: MaxAuthenticatedRequest, res: Response, next: NextF
 
     if (calculatedHash === hash) {
       // Validation passed
-      return extractUserAndProceed(params, req, next);
+      return extractUserAndProceed(params, req, res, next);
     }
 
     // Method 2: Hex string as key (alternative Max pattern)
@@ -59,7 +59,7 @@ export function maxAuth(req: MaxAuthenticatedRequest, res: Response, next: NextF
     const calculatedHash2 = crypto.createHmac('sha256', secretKeyHex).update(dataCheckString).digest('hex');
 
     if (calculatedHash2 === hash) {
-      return extractUserAndProceed(params, req, next);
+      return extractUserAndProceed(params, req, res, next);
     }
 
     // Method 3: Try without URL decoding
@@ -75,7 +75,7 @@ export function maxAuth(req: MaxAuthenticatedRequest, res: Response, next: NextF
     const calculatedHash3 = crypto.createHmac('sha256', secretKey).update(dataCheckStringRaw).digest('hex');
 
     if (calculatedHash3 === hashRaw) {
-      return extractUserAndProceed(paramsRaw, req, next);
+      return extractUserAndProceed(paramsRaw, req, res, next);
     }
 
     // Log debug info for troubleshooting
@@ -96,6 +96,7 @@ export function maxAuth(req: MaxAuthenticatedRequest, res: Response, next: NextF
 function extractUserAndProceed(
   params: URLSearchParams,
   req: MaxAuthenticatedRequest,
+  res: Response,
   next: NextFunction,
 ): void {
   // Validate auth_date freshness (24 hours)
@@ -107,6 +108,7 @@ function extractUserAndProceed(
     const now = Date.now();
     if (now - authTimestamp > 24 * 60 * 60 * 1000) {
       console.error('Max auth: data expired, auth_date:', authDate);
+      res.status(401).json({ error: 'Max auth data expired' });
       return;
     }
   }
@@ -114,6 +116,7 @@ function extractUserAndProceed(
   const userStr = params.get('user');
   if (!userStr) {
     console.error('Max auth: no user in initData, keys:', Array.from(params.keys()));
+    res.status(401).json({ error: 'Max user data missing' });
     return;
   }
 
@@ -122,5 +125,6 @@ function extractUserAndProceed(
     next();
   } catch (e) {
     console.error('Max auth: failed to parse user JSON:', userStr);
+    res.status(401).json({ error: 'Invalid Max user data' });
   }
 }
