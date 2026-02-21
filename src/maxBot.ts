@@ -25,7 +25,7 @@ export async function startMaxBot() {
 
   // /start
   maxBot.command('start', async (ctx: Context) => {
-    const name = ctx.message?.sender?.name || 'друг';
+    const name = ctx.message?.sender?.name || (ctx as any).user?.name || 'друг';
 
     await ctx.reply(
       `Добро пожаловать в Роза цветов!\n\n` +
@@ -127,8 +127,11 @@ export async function startMaxBot() {
   });
 
   // Welcome message when user opens chat with bot for the first time
+  // NOTE: bot_started fires ONCE per user. ctx.message is undefined here —
+  // use ctx.user for the user object.
   maxBot.on('bot_started', async (ctx: Context) => {
-    const name = (ctx as any).update?.user?.name || 'друг';
+    const name = (ctx as any).user?.name || 'друг';
+    console.log(`[Max] bot_started event from user: ${name} (id: ${(ctx as any).user?.user_id})`);
 
     await ctx.reply(
       `Добро пожаловать в Роза цветов! 🌹\n\n` +
@@ -182,8 +185,9 @@ export async function startMaxBot() {
   });
 
   try {
+    // Start polling for ALL update types (including bot_started)
     await maxBot.start();
-    console.log('Max bot started');
+    console.log('Max bot started (polling for all update types including bot_started)');
   } catch (err: any) {
     console.error(`Max bot startup failed: ${err.message || err}`);
     maxBot = null;
