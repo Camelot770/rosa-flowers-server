@@ -98,8 +98,15 @@ router.post('/webhook', async (req: Request, res: Response) => {
       return;
     }
 
-    // Fix 2.3: Wrap bonus earn in transaction
+    // Fix 2.3: Wrap bonus earn in transaction + idempotency check
     if (event === 'payment.succeeded') {
+      // Idempotency: skip if already paid (YuKassa may retry webhooks)
+      const existingOrder = await prisma.order.findUnique({ where: { id: orderId }, select: { paymentStatus: true } });
+      if (existingOrder?.paymentStatus === 'paid') {
+        res.json({ success: true });
+        return;
+      }
+
       const order = await prisma.$transaction(async (tx) => {
         const updatedOrder = await tx.order.update({
           where: { id: orderId },

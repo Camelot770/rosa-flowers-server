@@ -580,6 +580,10 @@ export async function broadcastMessage(
     try {
       await bot.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
       sent++;
+      // Rate limit: Telegram allows ~30 msg/sec, pause every 25
+      if (sent % 25 === 0) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     } catch (err) {
       console.error(`Failed to send broadcast to ${telegramId}:`, err);
       failed++;

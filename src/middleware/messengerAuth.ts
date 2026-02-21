@@ -39,6 +39,8 @@ export function messengerAuth(
           photoUrl: tgUser.photo_url,
         };
         next();
+      } else {
+        res.status(401).json({ error: 'Telegram auth failed: user data missing' });
       }
     });
   } else if (hasMaxData) {
@@ -54,6 +56,8 @@ export function messengerAuth(
           username: mxUser.username,
         };
         next();
+      } else {
+        res.status(401).json({ error: 'Max auth failed: user data missing' });
       }
     });
   } else {

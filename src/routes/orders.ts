@@ -63,7 +63,7 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
       return;
     }
     for (const item of items) {
-      if (!item.name || !item.quantity || item.quantity <= 0) {
+      if (!item.name || !item.quantity || item.quantity <= 0 || !item.price || item.price <= 0) {
         res.status(400).json({ error: 'Invalid item data' });
         return;
       }
@@ -103,7 +103,7 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
     const deliveryPrice = parseInt(settings.find((s) => s.key === 'delivery_price')?.value || '500');
     const freeFrom = parseInt(settings.find((s) => s.key === 'free_delivery_from')?.value || '5000');
 
-    if (deliveryType === 'delivery' && totalPrice < freeFrom) {
+    if (deliveryType === 'delivery' && productSubtotal < freeFrom) {
       totalPrice += deliveryPrice;
     }
 
