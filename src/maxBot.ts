@@ -1,95 +1,4 @@
-import { Bot, Keyboard, Context } from '@maxhub/max-bot-api';
-
-// IMPORTANT: open_app buttons only work with the EXACT registered URL.
-// Sub-paths like /orders are rejected. Pass route via ?page= query param.
-function getWebAppUrl(): string {
-  let url = process.env.MAX_WEBAPP_URL || process.env.WEBAPP_URL || 'https://rosa-flowers-client.vercel.app';
-  // Ensure trailing slash to match registered URL
-  if (!url.endsWith('/')) url += '/';
-  return url;
-}
-
-// Build a Mini App URL. For open_app buttons, sub-paths are NOT allowed —
-// only the exact registered base URL works. We pass the desired page via ?page= param.
-function miniAppUrl(base: string, page?: string): string {
-  if (!page) return base;
-  return `${base}?page=${encodeURIComponent(page)}`;
-}
-
-// Helper: create an open_app button (opens Mini App inside Max, not external browser).
-// The SDK v0.2.2 doesn't have this type yet, but the Max Bot API supports it.
-function openAppButton(text: string, url: string): any {
-  return { type: 'open_app', text, web_app: url };
-}
-
-// Helper: try to reply with open_app buttons, fall back to link buttons if URL not registered
-async function replyWithButtons(
-  ctx: Context,
-  text: string,
-  buttonRows: Array<Array<{ text: string; url: string }>>,
-  extraRows?: any[][],
-) {
-  // Build open_app keyboard
-  const openAppRows: any[][] = buttonRows.map((row) =>
-    row.map((b) => openAppButton(b.text, b.url)),
-  );
-  if (extraRows) openAppRows.push(...extraRows);
-
-  try {
-    await ctx.reply(text, {
-      attachments: [Keyboard.inlineKeyboard(openAppRows)],
-    });
-  } catch (err: any) {
-    // open_app failed (URL not registered in bot settings) — fall back to link buttons
-    console.warn('[Max] open_app failed, falling back to link buttons:', err.message || err);
-    const linkRows: any[][] = buttonRows.map((row) =>
-      row.map((b) => Keyboard.button.link(b.text, b.url)),
-    );
-    if (extraRows) linkRows.push(...extraRows);
-
-    try {
-      await ctx.reply(text, {
-        attachments: [Keyboard.inlineKeyboard(linkRows)],
-      });
-    } catch (err2: any) {
-      // Even link buttons failed — send plain text
-      console.error('[Max] link buttons also failed, sending plain text:', err2.message || err2);
-      await ctx.reply(text).catch(() => {});
-    }
-  }
-}
-
-// Helper: send message to user by ID with open_app buttons, fallback to link buttons
-async function sendToUserWithButtons(
-  bot: Bot,
-  userId: number,
-  text: string,
-  buttonRows: Array<Array<{ text: string; url: string }>>,
-) {
-  const openAppRows: any[][] = buttonRows.map((row) =>
-    row.map((b) => openAppButton(b.text, b.url)),
-  );
-
-  try {
-    await bot.api.sendMessageToUser(userId, text, {
-      attachments: [Keyboard.inlineKeyboard(openAppRows)],
-    });
-  } catch (err: any) {
-    console.warn(`[Max] open_app sendToUser failed, falling back to link buttons:`, err.message || err);
-    const linkRows: any[][] = buttonRows.map((row) =>
-      row.map((b) => Keyboard.button.link(b.text, b.url)),
-    );
-
-    try {
-      await bot.api.sendMessageToUser(userId, text, {
-        attachments: [Keyboard.inlineKeyboard(linkRows)],
-      });
-    } catch (err2: any) {
-      console.error(`[Max] link buttons also failed, sending plain text:`, err2.message || err2);
-      await bot.api.sendMessageToUser(userId, text).catch(() => {});
-    }
-  }
-}
+import { Bot, Context } from '@maxhub/max-bot-api';
 
 let maxBot: Bot | null = null;
 
@@ -106,8 +15,6 @@ export async function startMaxBot() {
 
   maxBot = new Bot(token);
 
-  const webAppUrl = getWebAppUrl();
-
   const welcomeText =
     `Добро пожаловать в Роза цветов!\n\n` +
     `Мы -- студия стабилизированной флористики. Живые цветы, которые не вянут. Букеты, которые остаются надолго.\n\n` +
@@ -117,58 +24,34 @@ export async function startMaxBot() {
     `- Кэшбэк 5% бонусами с каждого заказа\n\n` +
     `д. Званка, ул. Приозёрная, д. 58\n` +
     `+7 917 876-59-58\n` +
-    `Ежедневно 9:00 - 21:00`;
-
-  const mainButtons: Array<Array<{ text: string; url: string }>> = [
-    [{ text: 'Открыть магазин', url: miniAppUrl(webAppUrl) }],
-    [
-      { text: 'Заказы', url: miniAppUrl(webAppUrl, 'orders') },
-      { text: 'Бонусы', url: miniAppUrl(webAppUrl, 'profile') },
-    ],
-  ];
+    `Ежедневно 9:00 - 21:00\n\n` +
+    `Нажмите кнопку «Открыть» внизу, чтобы перейти в магазин.`;
 
   // /start
   maxBot.command('start', async (ctx: Context) => {
     const name = ctx.message?.sender?.name || (ctx as any).user?.name || 'друг';
-    console.log(`[Max] /start command from user: ${name}`);
-
-    await replyWithButtons(
-      ctx,
-      `Привет, ${name}!\n\n${welcomeText}`,
-      mainButtons,
-      [[Keyboard.button.callback('Помощь', 'help')]],
-    );
+    await ctx.reply(`Привет, ${name}!\n\n${welcomeText}`);
   });
 
   // /catalog
   maxBot.command('catalog', async (ctx: Context) => {
-    await replyWithButtons(
-      ctx,
-      'Каталог композиций\n\nСтабилизированные букеты -- живые цветы, которые не вянут. Выбирайте!',
-      [[{ text: 'Открыть каталог', url: webAppUrl }]],
-    );
+    await ctx.reply('Каталог композиций\n\nНажмите кнопку «Открыть» внизу, чтобы перейти в каталог.');
   });
 
   // /orders
   maxBot.command('orders', async (ctx: Context) => {
-    await replyWithButtons(
-      ctx,
-      'Мои заказы\n\nЗдесь вы можете отследить статус ваших заказов.',
-      [[{ text: 'Посмотреть заказы', url: miniAppUrl(webAppUrl, 'orders') }]],
-    );
+    await ctx.reply('Мои заказы\n\nНажмите кнопку «Открыть» внизу, чтобы посмотреть заказы.');
   });
 
   // /bonus
   maxBot.command('bonus', async (ctx: Context) => {
-    await replyWithButtons(
-      ctx,
+    await ctx.reply(
       'Бонусная программа\n\n' +
       'Как это работает:\n' +
       '- 5% кэшбэк с каждого оплаченного заказа\n' +
       '- Бонусами можно оплатить до 20% заказа\n' +
       '- 1 бонус = 1 рубль\n\n' +
-      'Откройте профиль, чтобы увидеть ваш баланс',
-      [[{ text: 'Мой профиль', url: miniAppUrl(webAppUrl, 'profile') }]],
+      'Нажмите кнопку «Открыть» внизу, чтобы увидеть баланс.',
     );
   });
 
@@ -197,43 +80,26 @@ export async function startMaxBot() {
   });
 
   // Welcome message when user opens chat with bot for the first time
-  // NOTE: bot_started fires ONCE per user. ctx.message is undefined here —
-  // use ctx.user for the user object.
   maxBot.on('bot_started', async (ctx: Context) => {
     const name = (ctx as any).user?.name || 'друг';
     console.log(`[Max] bot_started event from user: ${name} (id: ${(ctx as any).user?.user_id})`);
-
-    await replyWithButtons(
-      ctx,
-      `Привет, ${name}!\n\n${welcomeText}`,
-      mainButtons,
-      [[Keyboard.button.callback('Помощь', 'help')]],
-    );
-  });
-
-  // Callback: help button
-  maxBot.on('message_callback', async (ctx: Context) => {
-    if (ctx.callback?.payload === 'help') {
-      await ctx.reply(helpText);
-    }
+    await ctx.reply(`Привет, ${name}!\n\n${welcomeText}`);
   });
 
   // Handle text messages (not commands) — friendly redirect
   maxBot.on('message_created', async (ctx: Context) => {
     const text = ctx.message?.body?.text;
     if (text && !text.startsWith('/')) {
-      await replyWithButtons(
-        ctx,
-        'Чтобы заказать букет, откройте наш магазин!\n\nЕсли у вас вопрос -- звоните: +7 917 876-59-58',
-        [[{ text: 'Открыть магазин', url: webAppUrl }]],
+      await ctx.reply(
+        'Чтобы заказать букет, нажмите кнопку «Открыть» внизу экрана.\n\n' +
+        'Если у вас вопрос -- звоните: +7 917 876-59-58',
       );
     }
   });
 
   try {
-    // Start polling for ALL update types (including bot_started)
     await maxBot.start();
-    console.log(`Max bot started (polling, webAppUrl=${webAppUrl})`);
+    console.log('Max bot started');
   } catch (err: any) {
     console.error(`Max bot startup failed: ${err.message || err}`);
     maxBot = null;
@@ -245,33 +111,26 @@ export async function startMaxBot() {
 export async function maxNotifyOrderStatus(maxId: string, orderId: number, status: string) {
   if (!maxBot) return;
 
-  const webAppUrl = getWebAppUrl();
-
-  const statusTemplates: Record<string, { title: string; body: string; buttonText: string }> = {
+  const statusTemplates: Record<string, { title: string; body: string }> = {
     confirmed: {
       title: 'Заказ подтверждён!',
       body: `Ваш заказ #${orderId} подтверждён.\nМы уже готовимся к его сборке.`,
-      buttonText: 'Детали заказа',
     },
     preparing: {
       title: 'Собираем ваш букет!',
       body: `Ваш заказ #${orderId} уже в работе!\nНаш флорист с любовью собирает композицию.`,
-      buttonText: 'Следить за заказом',
     },
     delivering: {
       title: 'Заказ в пути!',
       body: `Ваш заказ #${orderId} уже едет!\nКурьер выехал и скоро будет по указанному адресу.`,
-      buttonText: 'Отследить заказ',
     },
     completed: {
       title: 'Заказ доставлен!',
       body: `Ваш заказ #${orderId} успешно выполнен!\nНадеемся, букет принесёт радость!\nСпасибо, что выбираете Роза цветов!`,
-      buttonText: 'Заказать ещё',
     },
     canceled: {
       title: 'Заказ отменён',
       body: `Ваш заказ #${orderId} был отменён.\nЕсли это по ошибке -- звоните: +7 917 876-59-58`,
-      buttonText: 'Новый заказ',
     },
   };
 
@@ -279,14 +138,12 @@ export async function maxNotifyOrderStatus(maxId: string, orderId: number, statu
   const text = template
     ? `${template.title}\n\n${template.body}`
     : `Заказ #${orderId}\nСтатус: ${status}`;
-  const btnText = template?.buttonText || 'Посмотреть заказ';
 
-  await sendToUserWithButtons(
-    maxBot,
-    Number(maxId),
-    text,
-    [[{ text: btnText, url: miniAppUrl(webAppUrl, 'orders') }]],
-  );
+  try {
+    await maxBot.api.sendMessageToUser(Number(maxId), text);
+  } catch (e) {
+    console.error(`Failed to send Max notification to ${maxId}:`, e);
+  }
 }
 
 export async function maxNotifyOrderCreated(
@@ -299,7 +156,6 @@ export async function maxNotifyOrderCreated(
 ) {
   if (!maxBot) return;
 
-  const webAppUrl = getWebAppUrl();
   const deliveryText = deliveryType === 'pickup' ? 'Самовывоз' : 'Доставка';
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
 
@@ -312,15 +168,11 @@ export async function maxNotifyOrderCreated(
     (bonusEarned > 0 ? `\nПосле оплаты вам начислится ${bonusEarned} бонусов!\n` : '') +
     `\nОжидайте подтверждения. Мы свяжемся с вами в ближайшее время!`;
 
-  await sendToUserWithButtons(
-    maxBot,
-    Number(maxId),
-    text,
-    [
-      [{ text: 'Мои заказы', url: miniAppUrl(webAppUrl, 'orders') }],
-      [{ text: 'Продолжить покупки', url: miniAppUrl(webAppUrl) }],
-    ],
-  );
+  try {
+    await maxBot.api.sendMessageToUser(Number(maxId), text);
+  } catch (e) {
+    console.error(`Failed to send Max order notification to ${maxId}:`, e);
+  }
 }
 
 interface OrderItemInfo {
@@ -343,12 +195,10 @@ export async function maxNotifyPaymentSuccess(
 ) {
   if (!maxBot) return;
 
-  const webAppUrl = getWebAppUrl();
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
 
   let text = `Оплата получена!\n\nЗаказ #${orderId}\n`;
 
-  // Состав заказа
   if (items && items.length > 0) {
     text += `\nСостав заказа:\n`;
     for (const item of items) {
@@ -361,7 +211,6 @@ export async function maxNotifyPaymentSuccess(
 
   text += `\nИтого: ${priceFormatted} руб.\n`;
 
-  // Доставка
   if (deliveryType === 'delivery') {
     text += `\nДоставка`;
     if (address) text += `: ${address}`;
@@ -386,12 +235,11 @@ export async function maxNotifyPaymentSuccess(
 
   text += `\nМы уже начинаем собирать ваш букет!`;
 
-  await sendToUserWithButtons(
-    maxBot,
-    Number(maxId),
-    text,
-    [[{ text: 'Статус заказа', url: miniAppUrl(webAppUrl, 'orders') }]],
-  );
+  try {
+    await maxBot.api.sendMessageToUser(Number(maxId), text);
+  } catch (e) {
+    console.error(`Failed to send Max payment notification to ${maxId}:`, e);
+  }
 }
 
 export async function maxBroadcastMessage(
@@ -407,7 +255,6 @@ export async function maxBroadcastMessage(
     try {
       await maxBot.api.sendMessageToUser(Number(maxId), message);
       sent++;
-      // Rate limit: Max allows 30 rps, add small delay
       if (sent % 25 === 0) {
         await new Promise((r) => setTimeout(r, 1000));
       }
