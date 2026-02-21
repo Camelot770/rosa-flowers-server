@@ -126,6 +126,36 @@ export async function startMaxBot() {
     await ctx.reply(helpText);
   });
 
+  // Welcome message when user opens chat with bot for the first time
+  maxBot.on('bot_started', async (ctx: Context) => {
+    const name = (ctx as any).update?.user?.name || 'друг';
+
+    await ctx.reply(
+      `Добро пожаловать в Роза цветов! 🌹\n\n` +
+      `Привет, ${name}!\n\n` +
+      `Мы — студия стабилизированной флористики. Живые цветы, которые не вянут. Букеты, которые остаются надолго.\n\n` +
+      `Что мы предлагаем:\n` +
+      `• Стабилизированные композиции\n` +
+      `• Доставка по городу за 1-3 часа\n` +
+      `• Кэшбэк 5% бонусами с каждого заказа\n\n` +
+      `📍 д. Званка, ул. Приозёрная, д. 58\n` +
+      `📞 +7 917 876-59-58\n` +
+      `🕘 Ежедневно 9:00 - 21:00`,
+      {
+        attachments: [
+          Keyboard.inlineKeyboard([
+            [openAppButton('🛍 Открыть магазин', webAppUrl)],
+            [
+              openAppButton('📦 Заказы', `${webAppUrl}/orders`),
+              openAppButton('⭐ Бонусы', `${webAppUrl}/profile`),
+            ],
+            [Keyboard.button.callback('❓ Помощь', 'help')],
+          ]),
+        ],
+      },
+    );
+  });
+
   // Callback: help button
   maxBot.on('message_callback', async (ctx: Context) => {
     if (ctx.callback?.payload === 'help') {
