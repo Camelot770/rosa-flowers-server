@@ -1,11 +1,19 @@
 import { Bot, Keyboard, Context } from '@maxhub/max-bot-api';
 
-// IMPORTANT: the URL must match EXACTLY what's registered in Max bot settings
-// (including trailing slash). Max API returns 404 "Link not found" otherwise.
+// IMPORTANT: open_app buttons only work with the EXACT registered URL.
+// Sub-paths like /orders are rejected. Pass route via ?page= query param.
 function getWebAppUrl(): string {
   let url = process.env.MAX_WEBAPP_URL || process.env.WEBAPP_URL || 'https://rosa-flowers-client.vercel.app';
+  // Ensure trailing slash to match registered URL
   if (!url.endsWith('/')) url += '/';
   return url;
+}
+
+// Build a Mini App URL. For open_app buttons, sub-paths are NOT allowed —
+// only the exact registered base URL works. We pass the desired page via ?page= param.
+function miniAppUrl(base: string, page?: string): string {
+  if (!page) return base;
+  return `${base}?page=${encodeURIComponent(page)}`;
 }
 
 // Helper: create an open_app button (opens Mini App inside Max, not external browser).
@@ -112,10 +120,10 @@ export async function startMaxBot() {
     `Ежедневно 9:00 - 21:00`;
 
   const mainButtons: Array<Array<{ text: string; url: string }>> = [
-    [{ text: 'Открыть магазин', url: webAppUrl }],
+    [{ text: 'Открыть магазин', url: miniAppUrl(webAppUrl) }],
     [
-      { text: 'Заказы', url: `${webAppUrl}orders` },
-      { text: 'Бонусы', url: `${webAppUrl}profile` },
+      { text: 'Заказы', url: miniAppUrl(webAppUrl, 'orders') },
+      { text: 'Бонусы', url: miniAppUrl(webAppUrl, 'profile') },
     ],
   ];
 
@@ -146,7 +154,7 @@ export async function startMaxBot() {
     await replyWithButtons(
       ctx,
       'Мои заказы\n\nЗдесь вы можете отследить статус ваших заказов.',
-      [[{ text: 'Посмотреть заказы', url: `${webAppUrl}orders` }]],
+      [[{ text: 'Посмотреть заказы', url: miniAppUrl(webAppUrl, 'orders') }]],
     );
   });
 
@@ -160,7 +168,7 @@ export async function startMaxBot() {
       '- Бонусами можно оплатить до 20% заказа\n' +
       '- 1 бонус = 1 рубль\n\n' +
       'Откройте профиль, чтобы увидеть ваш баланс',
-      [[{ text: 'Мой профиль', url: `${webAppUrl}profile` }]],
+      [[{ text: 'Мой профиль', url: miniAppUrl(webAppUrl, 'profile') }]],
     );
   });
 
@@ -277,7 +285,7 @@ export async function maxNotifyOrderStatus(maxId: string, orderId: number, statu
     maxBot,
     Number(maxId),
     text,
-    [[{ text: btnText, url: `${webAppUrl}orders` }]],
+    [[{ text: btnText, url: miniAppUrl(webAppUrl, 'orders') }]],
   );
 }
 
@@ -309,8 +317,8 @@ export async function maxNotifyOrderCreated(
     Number(maxId),
     text,
     [
-      [{ text: 'Мои заказы', url: `${webAppUrl}orders` }],
-      [{ text: 'Продолжить покупки', url: webAppUrl }],
+      [{ text: 'Мои заказы', url: miniAppUrl(webAppUrl, 'orders') }],
+      [{ text: 'Продолжить покупки', url: miniAppUrl(webAppUrl) }],
     ],
   );
 }
@@ -382,7 +390,7 @@ export async function maxNotifyPaymentSuccess(
     maxBot,
     Number(maxId),
     text,
-    [[{ text: 'Статус заказа', url: `${webAppUrl}orders` }]],
+    [[{ text: 'Статус заказа', url: miniAppUrl(webAppUrl, 'orders') }]],
   );
 }
 
