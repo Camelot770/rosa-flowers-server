@@ -185,6 +185,8 @@ router.post('/webhook', async (req: Request, res: Response) => {
           customerName,
           platform,
           order.bonusEarned,
+          order.recipientPhone || undefined,
+          order.bonusUsed,
         );
       } catch (e) {
         console.error('Failed to notify admin about payment:', e);

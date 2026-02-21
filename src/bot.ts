@@ -500,6 +500,8 @@ export async function notifyAdminPayment(
   customerName?: string,
   platform?: string,
   bonusEarned?: number,
+  recipientPhone?: string,
+  bonusUsed?: number,
 ) {
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
   const platformText = platform === 'max' ? '📱 Max' : '📱 Telegram';
@@ -536,7 +538,12 @@ export async function notifyAdminPayment(
     text += `\n`;
   }
   if (recipientName) {
-    text += `🎁 Получатель: ${recipientName}\n`;
+    text += `🎁 Получатель: ${recipientName}`;
+    if (recipientPhone) text += ` (${recipientPhone})`;
+    text += `\n`;
+  }
+  if (bonusUsed && bonusUsed > 0) {
+    text += `🔻 Использовано бонусов: ${bonusUsed}\n`;
   }
   if (bonusEarned && bonusEarned > 0) {
     text += `⭐ Начислено бонусов: ${bonusEarned}\n`;
@@ -551,7 +558,7 @@ export async function notifyAdminPayment(
 export async function notifyAdminContactMessage(
   senderName: string,
   senderUsername: string | null,
-  telegramId: string,
+  platformId: string,
   message: string,
 ) {
   const usernameText = senderUsername ? ` (@${senderUsername})` : '';
@@ -560,7 +567,7 @@ export async function notifyAdminContactMessage(
     `💬 *Сообщение от клиента*\n` +
     `━━━━━━━━━━━━━━━━━━━━\n\n` +
     `👤 ${senderName}${usernameText}\n` +
-    `🆔 ID: ${telegramId}\n\n` +
+    `🆔 ID: ${platformId}\n\n` +
     `📝 *Сообщение:*\n${message}`;
 
   await sendToAllAdmins(text);
