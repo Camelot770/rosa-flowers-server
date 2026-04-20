@@ -33,15 +33,26 @@ router.post('/create', messengerAuth, async (req: MessengerAuthenticatedRequest,
     if (order.userId !== user.id) { res.status(403).json({ error: 'Access denied' }); return; }
 
     // Формируем позиции для чека
-    const paymentItems = order.items.map((item) => ({
-      name: item.name,
-      price: item.price,
-      quantity: item.quantity,
-    }));
+    // Если есть промокод — применяем скидку пропорционально к каждой позиции
+    const originalItemsTotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const promoDiscount = order.promoDiscount || 0;
+
+    const paymentItems = order.items.map((item) => {
+      let price = item.price;
+      if (promoDiscount > 0 && originalItemsTotal > 0) {
+        // Применяем 10% скидку к цене единицы
+        price = Math.round(item.price * (1 - promoDiscount / originalItemsTotal));
+      }
+      return {
+        name: item.name,
+        price,
+        quantity: item.quantity,
+      };
+    });
 
     // Если есть доставка — добавляем как отдельную позицию
-    const itemsTotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const deliveryCost = order.totalPrice - itemsTotal + (order.bonusUsed || 0);
+    const discountedItemsTotal = paymentItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const deliveryCost = order.totalPrice - discountedItemsTotal + (order.bonusUsed || 0);
     if (deliveryCost > 0) {
       paymentItems.push({
         name: 'Доставка',

@@ -8,6 +8,7 @@ const PUBLIC_SETTINGS_KEYS = [
   'delivery_price', 'free_delivery_from', 'min_order',
   'bonus_percent', 'max_bonus_discount',
   'telegram_link', 'instagram_link',
+  'hero_title', 'hero_subtitle', 'hero_description', 'hero_delivery_text',
 ];
 
 // GET /api/settings — public settings only
