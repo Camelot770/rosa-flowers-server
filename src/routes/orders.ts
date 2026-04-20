@@ -51,6 +51,7 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
       bonusUsed,
       isAnonymous,
       cardText,
+      promoCode,
     } = req.body;
 
     // Fix 1.2: Input validation
@@ -88,10 +89,22 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
     // Fix 1.4: Save product subtotal BEFORE bonus and delivery modifications
     const productSubtotal = totalPrice;
 
+    // Promo code validation (server-side)
+    let promoDiscount = 0;
+    let validPromoCode: string | null = null;
+    if (promoCode && typeof promoCode === 'string') {
+      const code = promoCode.trim().toUpperCase();
+      if (code === 'VISITKA10') {
+        promoDiscount = Math.floor(productSubtotal * 0.1); // 10% off
+        validPromoCode = code;
+        totalPrice -= promoDiscount;
+      }
+    }
+
     // Validate bonus usage
     let actualBonusUsed = 0;
     if (bonusUsed && bonusUsed > 0) {
-      const maxBonus = Math.floor(totalPrice * 0.2); // max 20% discount
+      const maxBonus = Math.floor(totalPrice * 0.2); // max 20% discount (after promo)
       actualBonusUsed = Math.min(bonusUsed, user.bonusPoints, maxBonus);
       totalPrice -= actualBonusUsed;
     }
@@ -128,6 +141,8 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
           totalPrice,
           bonusUsed: actualBonusUsed,
           bonusEarned,
+          promoCode: validPromoCode,
+          promoDiscount,
           isAnonymous: isAnonymous || false,
           cardText,
           items: {

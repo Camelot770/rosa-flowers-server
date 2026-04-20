@@ -113,6 +113,8 @@ model Order {
   totalPrice      Int
   bonusUsed       Int       @default(0)
   bonusEarned     Int       @default(0)
+  promoCode       String?
+  promoDiscount   Int       @default(0)
   paymentId       String?
   paymentStatus   String    @default("pending")
   isAnonymous     Boolean   @default(false)

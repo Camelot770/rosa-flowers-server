@@ -6,6 +6,15 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌹 Seeding Rosa Flowers database...');
 
+  // Check if database already has data — skip seed to preserve admin changes
+  const existingBouquets = await prisma.bouquet.count();
+  if (existingBouquets > 0) {
+    console.log(`✅ Database already has ${existingBouquets} bouquets — skipping seed to preserve data.`);
+    return;
+  }
+
+  console.log('📦 Empty database detected — running initial seed...');
+
   // Admin user
   const hashedPassword = await bcrypt.hash('admin123', 10);
   await prisma.adminUser.upsert({
@@ -37,7 +46,7 @@ async function main() {
   for (const s of settings) {
     await prisma.setting.upsert({
       where: { key: s.key },
-      update: { value: s.value },
+      update: {},
       create: s,
     });
   }
@@ -361,51 +370,8 @@ async function main() {
     },
   ];
 
-  // Удаляем все старые букеты и их изображения перед вставкой новых
-  const bouquetNames = bouquets.map((b) => b.name);
-  // Удалить изображения букетов, которых нет в новом каталоге
-  const oldBouquets = await prisma.bouquet.findMany({
-    where: { name: { notIn: bouquetNames } },
-    select: { id: true },
-  });
-  if (oldBouquets.length > 0) {
-    const oldIds = oldBouquets.map((b) => b.id);
-    await prisma.bouquetImage.deleteMany({ where: { bouquetId: { in: oldIds } } });
-    await prisma.bouquet.deleteMany({ where: { id: { in: oldIds } } });
-    console.log(`🗑️  Removed ${oldBouquets.length} old bouquets not in catalog`);
-  }
-
   for (let i = 0; i < bouquets.length; i++) {
     const b = bouquets[i];
-    const existing = await prisma.bouquet.findFirst({ where: { name: b.name } });
-    if (existing) {
-      // Обновляем существующий букет (цена, описание и т.д.)
-      await prisma.bouquet.update({
-        where: { id: existing.id },
-        data: {
-          description: b.description,
-          price: b.price,
-          oldPrice: (b as any).oldPrice || null,
-          category: b.category,
-          tags: JSON.stringify(b.tags),
-          isHit: b.isHit || false,
-          isNew: b.isNew || false,
-          sortOrder: i,
-        },
-      });
-      // Обновляем изображения
-      await prisma.bouquetImage.deleteMany({ where: { bouquetId: existing.id } });
-      for (let j = 0; j < b.images.length; j++) {
-        await prisma.bouquetImage.create({
-          data: {
-            bouquetId: existing.id,
-            url: b.images[j],
-            sortOrder: j,
-          },
-        });
-      }
-      continue;
-    }
 
     const bouquet = await prisma.bouquet.create({
       data: {

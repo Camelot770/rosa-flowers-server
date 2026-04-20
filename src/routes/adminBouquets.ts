@@ -1,7 +1,27 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 import { prisma } from '../index';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { upload } from '../middleware/upload';
+
+// Wrapper to handle multer errors gracefully
+function handleUpload(fieldName: string, maxCount: number) {
+  const multerMiddleware = upload.array(fieldName, maxCount);
+  return (req: Request, res: Response, next: NextFunction) => {
+    multerMiddleware(req, res, (err: any) => {
+      if (err instanceof multer.MulterError) {
+        res.status(400).json({ error: `Ошибка загрузки: ${err.message}` });
+        return;
+      }
+      if (err) {
+        console.error('Upload error:', err);
+        res.status(500).json({ error: 'Ошибка загрузки файлов' });
+        return;
+      }
+      next();
+    });
+  };
+}
 
 const router = Router();
 router.use(adminAuth);
@@ -45,7 +65,7 @@ router.get('/:id', async (req: AdminRequest, res: Response) => {
 });
 
 // POST /api/admin/bouquets — создать букет
-router.post('/', upload.array('images', 10), async (req: AdminRequest, res: Response) => {
+router.post('/', handleUpload('images', 10), async (req: AdminRequest, res: Response) => {
   try {
     const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, sortOrder } = req.body;
     const files = req.files as Express.Multer.File[];
@@ -93,7 +113,7 @@ router.post('/', upload.array('images', 10), async (req: AdminRequest, res: Resp
 });
 
 // PUT /api/admin/bouquets/:id — обновить букет
-router.put('/:id', upload.array('images', 10), async (req: AdminRequest, res: Response) => {
+router.put('/:id', handleUpload('images', 10), async (req: AdminRequest, res: Response) => {
   try {
     const id = parseInt(String(req.params.id));
     if (isNaN(id)) { res.status(400).json({ error: 'Invalid bouquet ID' }); return; }
