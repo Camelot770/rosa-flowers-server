@@ -67,7 +67,7 @@ router.get('/:id', async (req: AdminRequest, res: Response) => {
 // POST /api/admin/bouquets — создать букет
 router.post('/', handleUpload('images', 10), async (req: AdminRequest, res: Response) => {
   try {
-    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, sortOrder } = req.body;
+    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, customOrder, sortOrder } = req.body;
     const files = req.files as Express.Multer.File[];
 
     const parsedPrice = parseInt(price);
@@ -94,6 +94,7 @@ router.post('/', handleUpload('images', 10), async (req: AdminRequest, res: Resp
         inStock: inStock !== 'false',
         isHit: isHit === 'true',
         isNew: isNew === 'true',
+        customOrder: customOrder === 'true',
         sortOrder: Math.max(0, parseInt(sortOrder) || 0),
         images: {
           create: files?.map((f, i) => ({
@@ -117,7 +118,7 @@ router.put('/:id', handleUpload('images', 10), async (req: AdminRequest, res: Re
   try {
     const id = parseInt(String(req.params.id));
     if (isNaN(id)) { res.status(400).json({ error: 'Invalid bouquet ID' }); return; }
-    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, sortOrder, deleteImages } = req.body;
+    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, customOrder, sortOrder, deleteImages } = req.body;
     const files = req.files as Express.Multer.File[];
 
     const parsedPrice = parseInt(price);
@@ -156,6 +157,7 @@ router.put('/:id', handleUpload('images', 10), async (req: AdminRequest, res: Re
         inStock: inStock !== 'false',
         isHit: isHit === 'true',
         isNew: isNew === 'true',
+        customOrder: customOrder === 'true',
         sortOrder: Math.max(0, parseInt(sortOrder) || 0),
         images: files?.length ? {
           create: files.map((f, i) => ({
@@ -179,7 +181,7 @@ router.patch('/:id/toggle', async (req: AdminRequest, res: Response) => {
     const id = parseInt(String(req.params.id));
     if (isNaN(id)) { res.status(400).json({ error: 'Invalid bouquet ID' }); return; }
     const { field, value } = req.body;
-    if (!['inStock', 'isHit', 'isNew'].includes(field) || typeof value !== 'boolean') {
+    if (!['inStock', 'isHit', 'isNew', 'customOrder'].includes(field) || typeof value !== 'boolean') {
       res.status(400).json({ error: 'Invalid field or value' });
       return;
     }
