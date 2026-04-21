@@ -54,6 +54,7 @@ model Bouquet {
   inStock     Boolean   @default(true)
   isHit       Boolean   @default(false)
   isNew       Boolean   @default(false)
+  customOrder Boolean   @default(false)
   sortOrder   Int       @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
