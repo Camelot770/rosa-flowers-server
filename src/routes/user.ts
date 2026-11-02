@@ -42,7 +42,7 @@ router.get('/profile', messengerAuth, async (req: MessengerAuthenticatedRequest,
         photoUrl: mu.photoUrl || null,
       },
       include: {
-        addresses: true,
+        addresses: { where: { deletedAt: null } },
       },
     });
 
@@ -134,12 +134,16 @@ router.delete('/address/:id', messengerAuth, async (req: MessengerAuthenticatedR
 
     // Verify ownership
     const address = await prisma.address.findUnique({ where: { id } });
-    if (!address) { res.status(404).json({ error: 'Address not found' }); return; }
+    if (!address || address.deletedAt) { res.status(404).json({ error: 'Address not found' }); return; }
     if (address.userId !== user.id) { res.status(403).json({ error: 'Access denied' }); return; }
 
-    // Unlink from orders before deleting
-    await prisma.order.updateMany({ where: { addressId: id }, data: { addressId: null } });
-    await prisma.address.delete({ where: { id } });
+    // Orders still need the address for delivery, so an address they use is only hidden from the customer
+    const usedByOrders = await prisma.order.count({ where: { addressId: id } });
+    if (usedByOrders > 0) {
+      await prisma.address.update({ where: { id }, data: { deletedAt: new Date(), isDefault: false } });
+    } else {
+      await prisma.address.delete({ where: { id } });
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete address' });

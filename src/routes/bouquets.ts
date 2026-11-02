@@ -13,12 +13,15 @@ function parseTags(bouquet: any) {
   return bouquet;
 }
 
+// What can be ordered: in stock, or made to order
+const ORDERABLE = { OR: [{ inStock: true }, { customOrder: true }] };
+
 // GET /api/bouquets — список всех букетов
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { category, search, sort, isHit, isNew, featured, priceMin, priceMax, minPrice, maxPrice } = req.query;
 
-    const where: any = { inStock: true };
+    const where: any = { ...ORDERABLE };
     if (category && category !== 'all') {
       where.category = category as string;
     }
@@ -68,7 +71,7 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/categories', async (_req: Request, res: Response) => {
   try {
     const categories = await prisma.bouquet.findMany({
-      where: { inStock: true },
+      where: ORDERABLE,
       select: { category: true },
       distinct: ['category'],
     });

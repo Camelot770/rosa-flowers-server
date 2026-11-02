@@ -133,8 +133,10 @@ async function notifyPaid(orderId: number): Promise<void> {
   if (!order) return;
 
   const items = order.items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity }));
-  const address = order.address
-    ? `${order.address.street}, ${order.address.house}${order.address.apartment ? ', кв. ' + order.address.apartment : ''}`
+  const a = order.address;
+  // Site orders keep the city in the title: "Казань, Баумана"
+  const address = a
+    ? `${a.title.endsWith(`, ${a.street}`) ? a.title : a.street}, ${a.house}${a.apartment ? ', кв. ' + a.apartment : ''}`
     : undefined;
 
   // Notify client about successful payment (dispatches to correct platform)

@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../index';
 import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
 import { notifyOrderCreated } from '../notifications';
-import { applyPromo, assertMinOrder, cleanText, getOrderSettings, OrderError, priceItems } from '../services/orderPricing';
+import { applyPromo, assertMinOrder, cleanDeliveryDate, cleanText, getOrderSettings, OrderError, priceItems } from '../services/orderPricing';
 import { cancelOrderWithRefund } from '../services/loyalty';
 import { syncOrderPayment } from '../services/payments';
 
@@ -86,12 +86,13 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
         throw new OrderError('Укажите адрес доставки');
       }
       const address = await prisma.address.findUnique({ where: { id: addressId } });
-      if (!address || address.userId !== user.id) {
+      if (!address || address.userId !== user.id || address.deletedAt) {
         throw new OrderError('Адрес доставки не найден. Укажите его заново.');
       }
       orderAddressId = address.id;
     }
 
+    const date = cleanDeliveryDate(deliveryDate);
     const { lines, subtotal: productSubtotal } = await priceItems(items);
     const settings = await getOrderSettings();
     assertMinOrder(productSubtotal, settings.minOrder);
@@ -123,7 +124,7 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
           userId: user.id,
           addressId: orderAddressId,
           deliveryType: type,
-          deliveryDate: cleanText(deliveryDate, 32),
+          deliveryDate: date,
           deliveryTime: cleanText(deliveryTime, 32),
           recipientName: recipient,
           recipientPhone: phone,

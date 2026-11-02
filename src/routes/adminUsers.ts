@@ -64,7 +64,7 @@ router.get('/:id', async (req: AdminRequest, res: Response) => {
           orderBy: { createdAt: 'desc' },
           take: 20,
         },
-        addresses: true,
+        addresses: { where: { deletedAt: null } },
       },
     });
 

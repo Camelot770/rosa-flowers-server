@@ -95,3 +95,13 @@ export function cleanText(value: unknown, maxLength: number): string | null {
   const text = value.trim().slice(0, maxLength);
   return text || null;
 }
+
+// Delivery date from the checkout forms. Past dates are refused by the studio's clock, Kazan is UTC+3.
+export function cleanDeliveryDate(value: unknown): string | null {
+  const date = cleanText(value, 32);
+  const today = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (date && /^\d{4}-\d{2}-\d{2}$/.test(date) && date < today) {
+    throw new OrderError('Эта дата уже прошла, выберите другую');
+  }
+  return date;
+}

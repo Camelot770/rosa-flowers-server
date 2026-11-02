@@ -38,6 +38,7 @@ model Address {
   comment   String?
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
+  deletedAt DateTime? // removed by the customer but still used by their orders
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders Order[]

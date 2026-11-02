@@ -31,7 +31,7 @@ import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../index';
 import { notifyAdminNewOrder } from '../notifications';
-import { applyPromo, assertMinOrder, cleanText, getOrderSettings, OrderError, priceItems } from '../services/orderPricing';
+import { applyPromo, assertMinOrder, cleanDeliveryDate, cleanText, getOrderSettings, OrderError, priceItems } from '../services/orderPricing';
 import { syncOrderPayment } from '../services/payments';
 
 const router = Router();
@@ -121,6 +121,7 @@ router.post('/guest', async (req: Request, res: Response) => {
     if (body.delivery.type === 'delivery' && (!street || !house)) {
       throw new OrderError('Укажите улицу и дом для доставки');
     }
+    const deliveryDate = cleanDeliveryDate(body.delivery.date);
 
     /* ----- 2. Recompute prices from DB (never trust client) ----- */
     const { lines: lineItems, subtotal: productSubtotal } = await priceItems(body.items);
@@ -199,7 +200,7 @@ router.post('/guest', async (req: Request, res: Response) => {
         addressId,
         status: 'new',
         deliveryType: body.delivery.type,
-        deliveryDate: cleanText(body.delivery.date, 32),
+        deliveryDate,
         deliveryTime: cleanText(body.delivery.time, 32),
         recipientName: recipientName || `${firstName}`,
         recipientPhone: recipientPhone || phone,
