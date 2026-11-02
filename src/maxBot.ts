@@ -119,7 +119,7 @@ export async function startMaxBot() {
 
 // === Notification functions for Max users ===
 
-export async function maxNotifyOrderStatus(maxId: string, orderId: number, status: string) {
+export async function maxNotifyOrderStatus(maxId: string, orderId: number, status: string, deliveryType?: string) {
   if (!maxBot) return;
 
   const statusTemplates: Record<string, { title: string; body: string }> = {
@@ -144,6 +144,15 @@ export async function maxNotifyOrderStatus(maxId: string, orderId: number, statu
       body: `Ваш заказ #${orderId} был отменён.\nЕсли это по ошибке -- звоните: +7 917 876-59-58`,
     },
   };
+
+  // There is no courier on a pickup order
+  if (deliveryType === 'pickup') {
+    statusTemplates.delivering = {
+      title: 'Заказ готов!',
+      body: `Ваш заказ #${orderId} собран, можно забирать.`,
+    };
+    statusTemplates.completed.title = 'Заказ выдан!';
+  }
 
   const template = statusTemplates[status];
   const text = template

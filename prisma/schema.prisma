@@ -124,6 +124,7 @@ model Order {
   customerEmail   String?
   isAnonymous     Boolean   @default(false)
   cardText        String?
+  adminNote       String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

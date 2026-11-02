@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from './index';
 import * as telegramBot from './bot';
 import * as maxBotModule from './maxBot';
@@ -11,13 +12,13 @@ async function getUserPlatformInfo(userId: number) {
 }
 
 // Notify user about order status change — dispatches to the correct platform(s)
-export async function notifyOrderStatus(userId: number, orderId: number, status: string) {
+export async function notifyOrderStatus(userId: number, orderId: number, status: string, deliveryType?: string) {
   const user = await getUserPlatformInfo(userId);
   if (!user) return;
 
   if (user.telegramId) {
     try {
-      await telegramBot.notifyOrderStatus(user.telegramId, orderId, status);
+      await telegramBot.notifyOrderStatus(user.telegramId, orderId, status, deliveryType);
     } catch (e) {
       console.error('Failed to notify via Telegram (order status):', e);
     }
@@ -25,7 +26,7 @@ export async function notifyOrderStatus(userId: number, orderId: number, status:
 
   if (user.maxId) {
     try {
-      await maxBotModule.maxNotifyOrderStatus(user.maxId, orderId, status);
+      await maxBotModule.maxNotifyOrderStatus(user.maxId, orderId, status, deliveryType);
     } catch (e) {
       console.error('Failed to notify via Max (order status):', e);
     }
@@ -104,9 +105,41 @@ export async function notifyPaymentSuccess(
 // Admin notifications go to Telegram only (admin uses Telegram)
 export { notifyAdminNewOrder, notifyAdminPayment, notifyAdminContactMessage, notifyAdminAlert } from './bot';
 
-// Broadcast to all users on both platforms
-export async function broadcastMessage(message: string): Promise<{ sent: number; failed: number }> {
+export const BROADCAST_AUDIENCES = ['all', 'telegram', 'max', 'buyers'] as const;
+export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
+
+const AUDIENCE_FILTERS: Record<BroadcastAudience, Prisma.UserWhereInput> = {
+  all: { OR: [{ telegramId: { not: null } }, { maxId: { not: null } }] },
+  telegram: { telegramId: { not: null } },
+  max: { maxId: { not: null } },
+  buyers: {
+    OR: [{ telegramId: { not: null } }, { maxId: { not: null } }],
+    orders: { some: { paymentStatus: 'paid', status: { not: 'canceled' } } },
+  },
+};
+
+export async function broadcastAudienceCounts() {
+  const [all, telegram, max, buyers] = await Promise.all(
+    BROADCAST_AUDIENCES.map((audience) => prisma.user.count({ where: AUDIENCE_FILTERS[audience] })),
+  );
+  return { all, telegram, max, buyers };
+}
+
+// A message to one customer through the bot they use
+export async function messageUser(user: { telegramId: string | null; maxId: string | null }, message: string): Promise<boolean> {
+  const tg = user.telegramId ? await telegramBot.broadcastMessage([user.telegramId], message) : { sent: 0 };
+  const max = user.maxId ? await maxBotModule.maxBroadcastMessage([user.maxId], message) : { sent: 0 };
+  return tg.sent + max.sent > 0;
+}
+
+export async function sendTestToAdmins(message: string): Promise<{ sent: number; failed: number }> {
+  return telegramBot.broadcastMessage(telegramBot.adminIds(), message);
+}
+
+// Broadcast on both platforms
+export async function broadcastMessage(message: string, audience: BroadcastAudience = 'all'): Promise<{ sent: number; failed: number }> {
   const users = await prisma.user.findMany({
+    where: AUDIENCE_FILTERS[audience],
     select: { telegramId: true, maxId: true },
   });
 

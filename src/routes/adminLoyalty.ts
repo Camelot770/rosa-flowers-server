@@ -54,8 +54,8 @@ router.post('/:userId/adjust', async (req: AdminRequest, res: Response) => {
     const userId = parseInt(String(req.params.userId));
     const { amount, description } = req.body;
 
-    if (typeof amount !== 'number' || amount === 0 || isNaN(amount)) {
-      res.status(400).json({ error: 'Amount must be a non-zero number' });
+    if (!Number.isInteger(amount) || amount === 0) {
+      res.status(400).json({ error: 'Укажите целое число баллов, не ноль' });
       return;
     }
 
@@ -63,7 +63,7 @@ router.post('/:userId/adjust', async (req: AdminRequest, res: Response) => {
     if (amount < 0) {
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { bonusPoints: true } });
       if (!user || user.bonusPoints + amount < 0) {
-        res.status(400).json({ error: 'Insufficient bonus points' });
+        res.status(400).json({ error: 'У клиента столько баллов нет' });
         return;
       }
     }

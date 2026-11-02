@@ -218,7 +218,7 @@ export async function startBot() {
 }
 
 // Notify user about order status change with beautiful per-status messages
-export async function notifyOrderStatus(telegramId: string, orderId: number, status: string) {
+export async function notifyOrderStatus(telegramId: string, orderId: number, status: string, deliveryType?: string) {
   if (!bot) return;
 
   const webAppUrl = process.env.WEBAPP_URL || 'https://rosa-flowers-client.vercel.app';
@@ -267,6 +267,18 @@ export async function notifyOrderStatus(telegramId: string, orderId: number, sta
       buttonText: '💐 Новый заказ',
     },
   };
+
+  // There is no courier on a pickup order
+  if (deliveryType === 'pickup') {
+    statusTemplates.delivering = {
+      title: '🎁 Заказ готов!',
+      body:
+        `Ваш заказ *#${orderId}* собран, можно забирать.\n\n` +
+        `📞 Если нужно что-то уточнить — свяжитесь с нами.`,
+      buttonText: '📦 Детали заказа',
+    };
+    statusTemplates.completed.title = '🎉 Заказ выдан!';
+  }
 
   const template = statusTemplates[status];
 
@@ -422,6 +434,10 @@ export async function notifyPaymentSuccess(
 const ADMIN_IDS = ['5598055475', '736051965'];
 
 // Helper: send message to all admins
+export function adminIds(): string[] {
+  return ADMIN_IDS.map(String);
+}
+
 async function sendToAllAdmins(text: string) {
   if (!bot) return;
   for (const adminId of ADMIN_IDS) {
