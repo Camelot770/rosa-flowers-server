@@ -21,10 +21,17 @@ import { adminUserRoutes } from './routes/adminUsers';
 import { adminBroadcastRoutes } from './routes/adminBroadcast';
 import { settingsRoutes } from './routes/settings';
 import { paymentRoutes } from './routes/payment';
+import { guestOrderRoutes } from './routes/guestOrders';
+import { guestPaymentRoutes } from './routes/guestPayment';
 
 // Bots
 import { startBot } from './bot';
 import { startMaxBot } from './maxBot';
+
+// One-time data migrations that run at server boot (idempotent)
+import { applyBouquetRenames } from './startup/applyBouquetRenames';
+import { applyBouquetRenamesV2 } from './startup/applyBouquetRenamesV2';
+import { applyBouquetRenamesV3 } from './startup/applyBouquetRenamesV3';
 
 export const prisma = new PrismaClient();
 const app = express();
@@ -61,6 +68,10 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/favorites', favoriteRoutes);
 app.use('/api/contact', contactRoutes);
 
+// Web-shop guest routes (no auth — rosa-web frontend)
+app.use('/api/orders', guestOrderRoutes);    // POST /api/orders/guest + GET /api/orders/:id/status
+app.use('/api/payment', guestPaymentRoutes); // POST /api/payment/create-guest
+
 // Admin routes
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/bouquets', adminBouquetRoutes);
@@ -83,6 +94,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Rosa Flowers server running on port ${PORT}`);
   startBot().catch(err => console.error('Telegram bot startup failed:', err));
   startMaxBot().catch(err => console.error('Max bot startup failed:', err));
+  applyBouquetRenames().catch(err => console.error('Bouquet rename startup task failed:', err));
+  applyBouquetRenamesV2().catch(err => console.error('Bouquet rename v2 startup task failed:', err));
+  applyBouquetRenamesV3().catch(err => console.error('Bouquet rename v3 startup task failed:', err));
 });
 
 // Graceful shutdown
