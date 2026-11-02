@@ -11,6 +11,16 @@ const statusMessages: Record<string, string> = {
   canceled: '❌ Отменён',
 };
 
+// Customer-entered text must be escaped: a lone "_" or "*" makes Telegram reject the whole message
+function esc(text: string): string {
+  return text.replace(/([_*`\[])/g, '\\$1');
+}
+
+function toPlainText(markdown: string): string {
+  // Escaped characters stay as text, bare asterisks were formatting
+  return markdown.replace(/\\([_*`\[])|\*/g, (_match, escaped) => escaped || '');
+}
+
 export async function startBot() {
   const token = process.env.BOT_TOKEN;
   if (!token || token.startsWith('placeholder')) {
@@ -365,7 +375,7 @@ export async function notifyPaymentSuccess(
     text += `\n🛒 *Состав заказа:*\n`;
     for (const item of items) {
       const itemTotal = item.price * item.quantity;
-      text += `  • ${item.name}`;
+      text += `  • ${esc(item.name)}`;
       if (item.quantity > 1) text += ` ×${item.quantity}`;
       text += ` — ${itemTotal.toLocaleString('ru-RU')} ₽\n`;
     }
@@ -376,20 +386,20 @@ export async function notifyPaymentSuccess(
   // Доставка
   if (deliveryType === 'delivery') {
     text += `\n🚗 Доставка`;
-    if (address) text += `: ${address}`;
+    if (address) text += `: ${esc(address)}`;
     text += `\n`;
   } else if (deliveryType === 'pickup') {
     text += `\n🏪 Самовывоз\n`;
   }
 
   if (deliveryDate) {
-    text += `📅 ${deliveryDate}`;
-    if (deliveryTime) text += `, ${deliveryTime}`;
+    text += `📅 ${esc(deliveryDate)}`;
+    if (deliveryTime) text += `, ${esc(deliveryTime)}`;
     text += `\n`;
   }
 
   if (recipientName) {
-    text += `👤 Получатель: ${recipientName}\n`;
+    text += `👤 Получатель: ${esc(recipientName)}\n`;
   }
 
   if (bonusEarned > 0) {
@@ -417,10 +427,20 @@ async function sendToAllAdmins(text: string) {
   for (const adminId of ADMIN_IDS) {
     try {
       await bot.sendMessage(adminId, text, { parse_mode: 'Markdown' });
-    } catch (e) {
-      console.error(`Failed to send admin notification to ${adminId}:`, e);
+    } catch {
+      // An order alert must not be lost because of formatting
+      try {
+        await bot.sendMessage(adminId, toPlainText(text));
+      } catch (e) {
+        console.error(`Failed to send admin notification to ${adminId}:`, e);
+      }
     }
   }
+}
+
+// Alert admin(s) about a payment problem that needs a manual decision
+export async function notifyAdminAlert(text: string) {
+  await sendToAllAdmins(esc(text));
 }
 
 // Notify admin(s) about new order with full details
@@ -442,12 +462,12 @@ export async function notifyAdminNewOrder(
 ) {
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
   const deliveryText = deliveryType === 'pickup' ? '🏪 Самовывоз' : '🚗 Доставка';
-  const platformText = platform === 'max' ? '📱 Max' : '📱 Telegram';
+  const platformText = platform === 'max' ? '📱 Max' : platform === 'web' ? '🌐 Сайт' : '📱 Telegram';
 
   let text = `🔔 *Новый заказ!*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
   text += `📋 Заказ *#${orderId}*\n`;
   text += `${platformText}\n`;
-  text += `👤 Клиент: ${customerName}\n`;
+  text += `👤 Клиент: ${esc(customerName)}\n`;
   text += `💰 Сумма: *${priceFormatted} ₽*\n`;
   text += `${deliveryText}\n`;
 
@@ -456,7 +476,7 @@ export async function notifyAdminNewOrder(
     text += `\n🛒 *Состав заказа:*\n`;
     for (const item of items) {
       const itemTotal = item.price * item.quantity;
-      text += `  • ${item.name}`;
+      text += `  • ${esc(item.name)}`;
       if (item.quantity > 1) text += ` ×${item.quantity}`;
       text += ` — ${itemTotal.toLocaleString('ru-RU')} ₽\n`;
     }
@@ -464,18 +484,18 @@ export async function notifyAdminNewOrder(
 
   // Доставка
   if (deliveryType === 'delivery' && address) {
-    text += `\n📍 Адрес: ${address}\n`;
+    text += `\n📍 Адрес: ${esc(address)}\n`;
   }
   if (deliveryDate) {
-    text += `📅 ${deliveryDate}`;
-    if (deliveryTime) text += `, ${deliveryTime}`;
+    text += `📅 ${esc(deliveryDate)}`;
+    if (deliveryTime) text += `, ${esc(deliveryTime)}`;
     text += `\n`;
   }
   if (recipientName) {
-    text += `🎁 Получатель: ${recipientName}\n`;
+    text += `🎁 Получатель: ${esc(recipientName)}\n`;
   }
   if (recipientPhone) {
-    text += `📞 Телефон: ${recipientPhone}\n`;
+    text += `📞 Телефон: ${esc(recipientPhone)}\n`;
   }
   if (bonusUsed && bonusUsed > 0) {
     text += `🔻 Списано бонусов: ${bonusUsed}\n`;
@@ -504,12 +524,12 @@ export async function notifyAdminPayment(
   bonusUsed?: number,
 ) {
   const priceFormatted = totalPrice.toLocaleString('ru-RU');
-  const platformText = platform === 'max' ? '📱 Max' : '📱 Telegram';
+  const platformText = platform === 'max' ? '📱 Max' : platform === 'web' ? '🌐 Сайт' : '📱 Telegram';
 
   let text = `💳 *Оплата получена!*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
   text += `📋 Заказ *#${orderId}*\n`;
   text += `${platformText}\n`;
-  if (customerName) text += `👤 Клиент: ${customerName}\n`;
+  if (customerName) text += `👤 Клиент: ${esc(customerName)}\n`;
   text += `💰 Сумма: *${priceFormatted} ₽*\n`;
 
   // Состав заказа
@@ -517,7 +537,7 @@ export async function notifyAdminPayment(
     text += `\n🛒 *Состав заказа:*\n`;
     for (const item of items) {
       const itemTotal = item.price * item.quantity;
-      text += `  • ${item.name}`;
+      text += `  • ${esc(item.name)}`;
       if (item.quantity > 1) text += ` ×${item.quantity}`;
       text += ` — ${itemTotal.toLocaleString('ru-RU')} ₽\n`;
     }
@@ -526,20 +546,20 @@ export async function notifyAdminPayment(
   // Доставка
   if (deliveryType === 'delivery') {
     text += `\n🚗 Доставка`;
-    if (address) text += `: ${address}`;
+    if (address) text += `: ${esc(address)}`;
     text += `\n`;
   } else if (deliveryType === 'pickup') {
     text += `\n🏪 Самовывоз\n`;
   }
 
   if (deliveryDate) {
-    text += `📅 ${deliveryDate}`;
-    if (deliveryTime) text += `, ${deliveryTime}`;
+    text += `📅 ${esc(deliveryDate)}`;
+    if (deliveryTime) text += `, ${esc(deliveryTime)}`;
     text += `\n`;
   }
   if (recipientName) {
-    text += `🎁 Получатель: ${recipientName}`;
-    if (recipientPhone) text += ` (${recipientPhone})`;
+    text += `🎁 Получатель: ${esc(recipientName)}`;
+    if (recipientPhone) text += ` (${esc(recipientPhone)})`;
     text += `\n`;
   }
   if (bonusUsed && bonusUsed > 0) {
@@ -561,14 +581,14 @@ export async function notifyAdminContactMessage(
   platformId: string,
   message: string,
 ) {
-  const usernameText = senderUsername ? ` (@${senderUsername})` : '';
+  const usernameText = senderUsername ? ` (@${esc(senderUsername)})` : '';
 
   const text =
     `💬 *Сообщение от клиента*\n` +
     `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `👤 ${senderName}${usernameText}\n` +
+    `👤 ${esc(senderName)}${usernameText}\n` +
     `🆔 ID: ${platformId}\n\n` +
-    `📝 *Сообщение:*\n${message}`;
+    `📝 *Сообщение:*\n${esc(message)}`;
 
   await sendToAllAdmins(text);
 }
@@ -585,7 +605,8 @@ export async function broadcastMessage(
 
   for (const telegramId of telegramIds) {
     try {
-      await bot.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
+      // A lone markdown character in the text must not make the whole broadcast fail
+      await bot.sendMessage(telegramId, message, { parse_mode: 'Markdown' }).catch(() => bot.sendMessage(telegramId, message));
       sent++;
       // Rate limit: Telegram allows ~30 msg/sec, pause every 25
       if (sent % 25 === 0) {

@@ -102,7 +102,7 @@ export async function notifyPaymentSuccess(
 }
 
 // Admin notifications go to Telegram only (admin uses Telegram)
-export { notifyAdminNewOrder, notifyAdminPayment, notifyAdminContactMessage } from './bot';
+export { notifyAdminNewOrder, notifyAdminPayment, notifyAdminContactMessage, notifyAdminAlert } from './bot';
 
 // Broadcast to all users on both platforms
 export async function broadcastMessage(message: string): Promise<{ sent: number; failed: number }> {

@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../index';
 import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
+import { cleanText } from '../services/orderPricing';
 
 const router = Router();
 
@@ -87,6 +88,13 @@ router.post('/address', messengerAuth, async (req: MessengerAuthenticatedRequest
 
     const { title, street, house, apartment, entrance, floor, comment, isDefault } = req.body;
 
+    const cleanStreet = cleanText(street, 200);
+    const cleanHouse = cleanText(house, 50);
+    if (!cleanStreet || !cleanHouse) {
+      res.status(400).json({ error: 'Укажите улицу и дом' });
+      return;
+    }
+
     if (isDefault) {
       await prisma.address.updateMany({
         where: { userId: user.id },
@@ -97,14 +105,14 @@ router.post('/address', messengerAuth, async (req: MessengerAuthenticatedRequest
     const address = await prisma.address.create({
       data: {
         userId: user.id,
-        title: title || 'Дом',
-        street,
-        house,
-        apartment,
-        entrance,
-        floor,
-        comment,
-        isDefault: isDefault || false,
+        title: cleanText(title, 100) || 'Дом',
+        street: cleanStreet,
+        house: cleanHouse,
+        apartment: cleanText(apartment, 20),
+        entrance: cleanText(entrance, 20),
+        floor: cleanText(floor, 20),
+        comment: cleanText(comment, 500),
+        isDefault: isDefault === true,
       },
     });
 

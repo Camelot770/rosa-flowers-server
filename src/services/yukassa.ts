@@ -1,14 +1,72 @@
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
-interface PaymentItem {
+const API_URL = 'https://api.yookassa.ru/v3';
+const REQUEST_TIMEOUT_MS = 15000;
+
+export interface PaymentItem {
   name: string;
   price: number;
   quantity: number;
+  isService?: boolean;
 }
 
-interface PaymentResult {
+export interface PaymentResult {
   id: string;
   confirmationUrl: string;
+}
+
+export interface YooKassaPayment {
+  id: string;
+  status: string;
+  amount: { value: string; currency: string };
+  metadata?: { orderId?: string };
+  confirmation?: { confirmation_url?: string };
+}
+
+function authHeader(): string {
+  const shopId = process.env.YUKASSA_SHOP_ID;
+  const secretKey = process.env.YUKASSA_SECRET_KEY;
+
+  if (!shopId || !secretKey) {
+    throw new Error('YuKassa credentials not configured');
+  }
+
+  return 'Basic ' + Buffer.from(`${shopId}:${secretKey}`).toString('base64');
+}
+
+const RETURN_HOSTS = [
+  'rosa-flowers-client.vercel.app',
+  'rosa-cvetov-max.vercel.app',
+  'rosa-web.vercel.app',
+  'rosa-web-naums-projects-5189a309.vercel.app',
+  'xn--80aealh5bekx1b.xn--p1ai', // розацветов.рф
+  'www.xn--80aealh5bekx1b.xn--p1ai',
+];
+
+function hostOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
+// Only our own frontends may be used as the page YooKassa redirects to after payment
+export function safeReturnUrl(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  try {
+    const url = new URL(raw);
+    const allowed = [
+      ...RETURN_HOSTS,
+      hostOf(process.env.WEBAPP_URL),
+      hostOf(process.env.MAX_WEBAPP_URL),
+      hostOf(process.env.SITE_URL),
+    ];
+    return url.protocol === 'https:' && allowed.includes(url.hostname) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function createPayment(
@@ -18,15 +76,9 @@ export async function createPayment(
   items: PaymentItem[],
   customerEmail?: string,
   returnUrl?: string,
+  previousPaymentId?: string,
 ): Promise<PaymentResult> {
-  const shopId = process.env.YUKASSA_SHOP_ID;
-  const secretKey = process.env.YUKASSA_SECRET_KEY;
-
-  if (!shopId || !secretKey) {
-    throw new Error('YuKassa credentials not configured');
-  }
-
-  const idempotenceKey = uuidv4();
+  const authorization = authHeader();
 
   // Формируем позиции чека
   const receiptItems = items.map((item) => ({
@@ -37,7 +89,7 @@ export async function createPayment(
       currency: 'RUB',
     },
     vat_code: 1, // Без НДС
-    payment_subject: 'commodity',
+    payment_subject: item.isService ? 'service' : 'commodity',
     payment_mode: 'full_payment',
   }));
 
@@ -52,29 +104,38 @@ export async function createPayment(
     receipt.customer = { email: 'rozacvetov@list.ru' };
   }
 
-  const response = await fetch('https://api.yookassa.ru/v3/payments', {
+  const body = JSON.stringify({
+    amount: {
+      value: amount.toFixed(2),
+      currency: 'RUB',
+    },
+    confirmation: {
+      type: 'redirect',
+      return_url: returnUrl || process.env.YUKASSA_RETURN_URL || `${process.env.WEBAPP_URL}/orders`,
+    },
+    capture: true,
+    description,
+    receipt,
+    metadata: {
+      orderId: orderId.toString(),
+    },
+  });
+
+  // A retried request for the same order returns the same payment instead of charging twice
+  const idempotenceKey = crypto
+    .createHash('sha256')
+    .update(`${orderId}:${previousPaymentId || ''}:${body}`)
+    .digest('hex');
+
+  const response = await fetch(`${API_URL}/payments`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Idempotence-Key': idempotenceKey,
-      'Authorization': 'Basic ' + Buffer.from(`${shopId}:${secretKey}`).toString('base64'),
+      'Authorization': authorization,
     },
-    body: JSON.stringify({
-      amount: {
-        value: amount.toFixed(2),
-        currency: 'RUB',
-      },
-      confirmation: {
-        type: 'redirect',
-        return_url: returnUrl || process.env.YUKASSA_RETURN_URL || `${process.env.WEBAPP_URL}/orders`,
-      },
-      capture: true,
-      description,
-      receipt,
-      metadata: {
-        orderId: orderId.toString(),
-      },
-    }),
+    body,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -89,4 +150,22 @@ export async function createPayment(
     id: data.id,
     confirmationUrl: data.confirmation.confirmation_url,
   };
+}
+
+// Returns null when YooKassa does not know this payment, throws when YooKassa cannot be asked
+export async function fetchPayment(
+  paymentId: string,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<YooKassaPayment | null> {
+  const response = await fetch(`${API_URL}/payments/${encodeURIComponent(paymentId)}`, {
+    headers: { 'Authorization': authHeader() },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`YuKassa API error: ${response.status}`);
+  }
+
+  return (await response.json()) as YooKassaPayment;
 }

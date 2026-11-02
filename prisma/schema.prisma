@@ -119,6 +119,8 @@ model Order {
   promoDiscount   Int       @default(0)
   paymentId       String?
   paymentStatus   String    @default("pending")
+  guestToken      String?
+  customerEmail   String?
   isAnonymous     Boolean   @default(false)
   cardText        String?
   createdAt       DateTime  @default(now())
@@ -165,7 +167,7 @@ model LoyaltyHistory {
   id          Int      @id @default(autoincrement())
   userId      Int
   amount      Int
-  type        String   // "earn" | "spend"
+  type        String   // "earn" | "spend" | "refund" | "revoke"
   description String
   orderId     Int?
   createdAt   DateTime @default(now())
@@ -179,6 +181,7 @@ model AdminUser {
   id        Int      @id @default(autoincrement())
   login     String   @unique
   password  String
+  tokenVersion Int   @default(0)
   name      String   @default("Admin")
   createdAt DateTime @default(now())
 }

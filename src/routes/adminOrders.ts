@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../index';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { notifyOrderStatus } from '../notifications';
+import { cancelOrderWithRefund } from '../services/loyalty';
 
 const router = Router();
 router.use(adminAuth);
@@ -68,6 +69,10 @@ router.put('/:id/status', async (req: AdminRequest, res: Response) => {
     if (!allowed.includes(status)) {
       res.status(400).json({ error: `Нельзя сменить статус с "${currentOrder.status}" на "${status}"` });
       return;
+    }
+
+    if (status === 'canceled') {
+      await cancelOrderWithRefund(id);
     }
 
     const order = await prisma.order.update({

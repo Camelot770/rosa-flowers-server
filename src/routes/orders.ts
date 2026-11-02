@@ -2,6 +2,9 @@ import { Router, Response } from 'express';
 import { prisma } from '../index';
 import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
 import { notifyOrderCreated } from '../notifications';
+import { applyPromo, assertMinOrder, cleanText, getOrderSettings, OrderError, priceItems } from '../services/orderPricing';
+import { cancelOrderWithRefund } from '../services/loyalty';
+import { syncOrderPayment } from '../services/payments';
 
 const router = Router();
 
@@ -19,6 +22,14 @@ router.get('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: R
     const mu = req.messengerUser!;
     const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
+
+    const pending = await prisma.order.findMany({
+      where: { userId: user.id, paymentStatus: 'pending', paymentId: { not: null } },
+      select: { id: true, paymentId: true, paymentStatus: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+    await Promise.all(pending.map(syncOrderPayment));
 
     const orders = await prisma.order.findMany({
       where: { userId: user.id },
@@ -54,116 +65,90 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
       promoCode,
     } = req.body;
 
-    // Fix 1.2: Input validation
-    if (!Array.isArray(items) || items.length === 0) {
-      res.status(400).json({ error: 'Order must contain at least one item' });
-      return;
-    }
-    if (deliveryType && !['delivery', 'pickup'].includes(deliveryType)) {
-      res.status(400).json({ error: 'Invalid delivery type' });
-      return;
-    }
-    for (const item of items) {
-      if (!item.name || !item.quantity || item.quantity <= 0 || !item.price || item.price <= 0) {
-        res.status(400).json({ error: 'Invalid item data' });
-        return;
-      }
+    const type = deliveryType || 'delivery';
+    if (!['delivery', 'pickup'].includes(type)) {
+      throw new OrderError('Некорректный способ получения');
     }
 
-    // Fix 1.1 + 1.3: Server-side price validation from DB
-    let totalPrice = 0;
-    for (const item of items) {
-      if (item.bouquetId && !item.isConstructor) {
-        const bouquet = await prisma.bouquet.findUnique({ where: { id: item.bouquetId } });
-        if (!bouquet) {
-          res.status(400).json({ error: `Bouquet not found: ${item.bouquetId}` });
-          return;
-        }
-        totalPrice += bouquet.price * item.quantity;
-        item.price = bouquet.price; // override with DB price
-      } else {
-        totalPrice += item.price * item.quantity;
-      }
+    const recipient = cleanText(recipientName, 100);
+    if (!recipient) {
+      throw new OrderError('Укажите имя получателя');
+    }
+    const phone = cleanText(recipientPhone, 32);
+    if (!phone || phone.replace(/\D/g, '').length < 10) {
+      throw new OrderError('Укажите телефон получателя, минимум 10 цифр');
     }
 
-    // Fix 1.4: Save product subtotal BEFORE bonus and delivery modifications
-    const productSubtotal = totalPrice;
-
-    // Promo code validation (server-side)
-    let promoDiscount = 0;
-    let validPromoCode: string | null = null;
-    if (promoCode && typeof promoCode === 'string') {
-      const code = promoCode.trim().toUpperCase();
-      if (code === 'VISITKA10') {
-        promoDiscount = Math.floor(productSubtotal * 0.1); // 10% off
-        validPromoCode = code;
-        totalPrice -= promoDiscount;
+    // A delivery needs an address, and only the customer's own address can be used
+    let orderAddressId: number | null = null;
+    if (type === 'delivery') {
+      if (!Number.isInteger(addressId)) {
+        throw new OrderError('Укажите адрес доставки');
       }
+      const address = await prisma.address.findUnique({ where: { id: addressId } });
+      if (!address || address.userId !== user.id) {
+        throw new OrderError('Адрес доставки не найден. Укажите его заново.');
+      }
+      orderAddressId = address.id;
     }
+
+    const { lines, subtotal: productSubtotal } = await priceItems(items);
+    const settings = await getOrderSettings();
+    assertMinOrder(productSubtotal, settings.minOrder);
+
+    const promo = applyPromo(promoCode, productSubtotal);
+    let totalPrice = productSubtotal - promo.promoDiscount;
 
     // Validate bonus usage
     let actualBonusUsed = 0;
-    if (bonusUsed && bonusUsed > 0) {
-      const maxBonus = Math.floor(totalPrice * 0.2); // max 20% discount (after promo)
-      actualBonusUsed = Math.min(bonusUsed, user.bonusPoints, maxBonus);
+    const requestedBonus = Math.floor(Number(bonusUsed));
+    if (requestedBonus > 0) {
+      const maxBonus = Math.min(Math.floor((totalPrice * settings.maxBonusPercent) / 100), totalPrice - 1);
+      actualBonusUsed = Math.max(0, Math.min(requestedBonus, user.bonusPoints, maxBonus));
       totalPrice -= actualBonusUsed;
     }
 
     // Delivery cost
-    const settings = await prisma.setting.findMany({
-      where: { key: { in: ['delivery_price', 'free_delivery_from'] } },
-    });
-    const deliveryPrice = parseInt(settings.find((s) => s.key === 'delivery_price')?.value || '500');
-    const freeFrom = parseInt(settings.find((s) => s.key === 'free_delivery_from')?.value || '5000');
-
-    if (deliveryType === 'delivery' && productSubtotal < freeFrom) {
-      totalPrice += deliveryPrice;
+    if (type === 'delivery' && productSubtotal < settings.freeDeliveryFrom) {
+      totalPrice += settings.deliveryPrice;
     }
 
     // Calculate bonus earned on product subtotal (before delivery and discount)
-    const bonusPercent = parseInt(
-      (await prisma.setting.findUnique({ where: { key: 'bonus_percent' } }))?.value || '5'
-    );
-    const bonusEarned = Math.floor((productSubtotal * bonusPercent) / 100);
+    const bonusEarned = Math.floor((productSubtotal * settings.bonusPercent) / 100);
 
     // Fix 1.5: Wrap order creation + bonus spend in transaction
     const order = await prisma.$transaction(async (tx) => {
       const newOrder = await tx.order.create({
         data: {
           userId: user.id,
-          addressId: addressId || null,
-          deliveryType: deliveryType || 'delivery',
-          deliveryDate,
-          deliveryTime,
-          recipientName,
-          recipientPhone,
-          comment,
+          addressId: orderAddressId,
+          deliveryType: type,
+          deliveryDate: cleanText(deliveryDate, 32),
+          deliveryTime: cleanText(deliveryTime, 32),
+          recipientName: recipient,
+          recipientPhone: phone,
+          comment: cleanText(comment, 1000),
           totalPrice,
           bonusUsed: actualBonusUsed,
           bonusEarned,
-          promoCode: validPromoCode,
-          promoDiscount,
-          isAnonymous: isAnonymous || false,
-          cardText,
-          items: {
-            create: items.map((item: any) => ({
-              bouquetId: item.bouquetId || null,
-              name: item.name,
-              price: item.price,
-              quantity: item.quantity,
-              isConstructor: item.isConstructor || false,
-              constructorData: item.constructorData ? JSON.stringify(item.constructorData) : null,
-            })),
-          },
+          promoCode: promo.promoCode,
+          promoDiscount: promo.promoDiscount,
+          isAnonymous: isAnonymous === true,
+          cardText: cleanText(cardText, 1000),
+          items: { create: lines },
         },
         include: { items: true },
       });
 
       if (actualBonusUsed > 0) {
-        await tx.user.update({
-          where: { id: user.id },
+        // The guarded update keeps the balance from going negative under concurrent orders
+        const spent = await tx.user.updateMany({
+          where: { id: user.id, bonusPoints: { gte: actualBonusUsed } },
           data: { bonusPoints: { decrement: actualBonusUsed } },
         });
+        if (spent.count === 0) {
+          throw new OrderError('Бонусов уже недостаточно. Проверьте сумму и попробуйте ещё раз.', 409);
+        }
         await tx.loyaltyHistory.create({
           data: {
             userId: user.id,
@@ -184,8 +169,8 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
         user.id,
         order.id,
         totalPrice,
-        items.length,
-        deliveryType || 'delivery',
+        lines.length,
+        type,
         bonusEarned,
       );
     } catch (e) {
@@ -197,8 +182,41 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
     // Fix 1.7: Return 201 for created order
     res.status(201).json(order);
   } catch (error) {
+    if (error instanceof OrderError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     console.error('Error creating order:', error);
-    res.status(500).json({ error: 'Failed to create order' });
+    res.status(500).json({ error: 'Не удалось создать заказ. Попробуйте ещё раз или позвоните нам.' });
+  }
+});
+
+// POST /api/orders/:id/cancel — клиент отменяет неоплаченный заказ
+router.post('/:id/cancel', messengerAuth, async (req: MessengerAuthenticatedRequest, res: Response) => {
+  try {
+    const mu = req.messengerUser!;
+    const user = await findUserByPlatform(mu.platform, mu.platformId);
+    if (!user) { res.status(404).json({ error: 'User not found' }); return; }
+
+    const id = parseInt(String(req.params.id));
+    if (isNaN(id)) { res.status(400).json({ error: 'Invalid order ID' }); return; }
+
+    const order = await prisma.order.findUnique({ where: { id } });
+    if (!order) { res.status(404).json({ error: 'Order not found' }); return; }
+    if (order.userId !== user.id) { res.status(403).json({ error: 'Access denied' }); return; }
+
+    await syncOrderPayment(order);
+    const fresh = await prisma.order.findUniqueOrThrow({ where: { id } });
+    if (fresh.paymentStatus === 'paid' || fresh.status !== 'new') {
+      res.status(409).json({ error: 'Этот заказ уже нельзя отменить. Позвоните нам, мы поможем.' });
+      return;
+    }
+
+    await cancelOrderWithRefund(id);
+    res.json(await prisma.order.findUnique({ where: { id }, include: { items: true, address: true } }));
+  } catch (error) {
+    console.error('Error canceling order:', error);
+    res.status(500).json({ error: 'Не удалось отменить заказ. Попробуйте ещё раз или позвоните нам.' });
   }
 });
 
@@ -220,7 +238,9 @@ router.get('/:id', messengerAuth, async (req: MessengerAuthenticatedRequest, res
     if (!order) { res.status(404).json({ error: 'Order not found' }); return; }
     if (order.userId !== user.id) { res.status(403).json({ error: 'Access denied' }); return; }
 
-    res.json(order);
+    await syncOrderPayment(order);
+
+    res.json(await prisma.order.findUnique({ where: { id }, include: { items: true, address: true } }));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch order' });
   }

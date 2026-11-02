@@ -7,9 +7,12 @@
  *
  *   - Order must exist
  *   - Order must belong to a "guest" user (telegramId/maxId both null)
- *   - Order must be in `paymentStatus = 'pending'`
- *   - Order must not have a paymentId yet
- *   - Order must be < 24h old (cheap rate-limit against orderId-guessing)
+ *   - The caller must present the order's `guestToken`, which only the
+ *     browser that created the order received
+ *   - Order must not be paid or canceled
+ *   - Order must be < 24h old
+ *
+ * A repeat call returns the same payment link while it can still be paid.
  *
  * The webhook (`POST /api/payment/webhook`) already handles paid-state
  * transitions correctly for guest orders — `notifyPaymentSuccess` skips
@@ -24,18 +27,20 @@
 
 import { Router, Request, Response } from 'express';
 import { prisma } from '../index';
-import { createPayment } from '../services/yukassa';
+import { safeReturnUrl } from '../services/yukassa';
+import { getOrCreatePayment, PaymentConflict } from '../services/payments';
 
 const router = Router();
 
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SITE_URL = process.env.SITE_URL || 'https://rosa-web.vercel.app';
 
 router.post('/create-guest', async (req: Request, res: Response) => {
   try {
-    const { orderId, returnUrl } = req.body as { orderId?: number; returnUrl?: string };
+    const { orderId, returnUrl, token } = req.body as { orderId?: number; returnUrl?: string; token?: string };
 
-    if (!orderId || !Number.isFinite(orderId)) {
-      res.status(400).json({ error: 'Invalid order ID' });
+    if (!orderId || !Number.isInteger(orderId)) {
+      res.status(400).json({ error: 'Некорректный номер заказа' });
       return;
     }
 
@@ -45,7 +50,7 @@ router.post('/create-guest', async (req: Request, res: Response) => {
     });
 
     if (!order) {
-      res.status(404).json({ error: 'Order not found' });
+      res.status(404).json({ error: 'Заказ не найден' });
       return;
     }
 
@@ -54,63 +59,38 @@ router.post('/create-guest', async (req: Request, res: Response) => {
       return;
     }
 
-    if (order.paymentStatus !== 'pending') {
-      res.status(409).json({ error: `Order already ${order.paymentStatus}` });
+    if (!order.guestToken || order.guestToken !== token) {
+      res.status(403).json({ error: 'Нет доступа к этому заказу' });
       return;
     }
-    if (order.paymentId) {
-      res.status(409).json({ error: 'Payment already initialized for this order' });
+
+    if (order.paymentStatus === 'paid') {
+      res.status(409).json({ error: 'Заказ уже оплачен' });
+      return;
+    }
+    if (order.status === 'canceled') {
+      res.status(409).json({ error: 'Заказ отменён' });
       return;
     }
 
     if (Date.now() - order.createdAt.getTime() > MAX_AGE_MS) {
-      res.status(410).json({ error: 'Order expired' });
+      res.status(410).json({ error: 'Срок оплаты заказа истёк. Оформите заказ заново.' });
       return;
     }
 
-    /* ---- Receipt items, mirroring the authed flow ---- */
-    const originalItemsTotal = order.items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0,
+    const payment = await getOrCreatePayment(
+      order,
+      safeReturnUrl(returnUrl) || `${SITE_URL}/thank-you?orderId=${order.id}`,
     );
-    const promoDiscount = order.promoDiscount || 0;
-
-    const paymentItems = order.items.map((item) => {
-      let price = item.price;
-      if (promoDiscount > 0 && originalItemsTotal > 0) {
-        price = Math.round(item.price * (1 - promoDiscount / originalItemsTotal));
-      }
-      return { name: item.name, price, quantity: item.quantity };
-    });
-
-    const discountedItemsTotal = paymentItems.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0,
-    );
-    const deliveryCost = order.totalPrice - discountedItemsTotal;
-    if (deliveryCost > 0) {
-      paymentItems.push({ name: 'Доставка', price: deliveryCost, quantity: 1 });
-    }
-
-    /* ---- Create YuKassa payment ---- */
-    const payment = await createPayment(
-      order.totalPrice,
-      order.id,
-      `Заказ #${order.id} — Роза цветов`,
-      paymentItems,
-      undefined,
-      returnUrl,
-    );
-
-    await prisma.order.update({
-      where: { id: order.id },
-      data: { paymentId: payment.id },
-    });
 
     res.json({ confirmationUrl: payment.confirmationUrl, paymentId: payment.id });
   } catch (error) {
+    if (error instanceof PaymentConflict) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
     console.error('Guest payment error:', error);
-    res.status(500).json({ error: 'Failed to create payment' });
+    res.status(500).json({ error: 'Не удалось создать платёж. Попробуйте ещё раз или позвоните нам.' });
   }
 });
 

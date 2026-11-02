@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../index';
 import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
-import { createPayment } from '../services/yukassa';
-import { notifyPaymentSuccess, notifyAdminPayment } from '../notifications';
+import { fetchPayment, safeReturnUrl } from '../services/yukassa';
+import { applyPaymentState, getOrCreatePayment, PaymentConflict } from '../services/payments';
 
 const router = Router();
 
@@ -22,8 +22,8 @@ router.post('/create', messengerAuth, async (req: MessengerAuthenticatedRequest,
     const user = await findUserByPlatform(mu.platform, mu.platformId);
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
-    const { orderId, returnUrl } = req.body;
-    if (!orderId || isNaN(orderId)) { res.status(400).json({ error: 'Invalid order ID' }); return; }
+    const orderId = Number(req.body.orderId);
+    if (!Number.isInteger(orderId) || orderId <= 0) { res.status(400).json({ error: 'Invalid order ID' }); return; }
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -31,64 +31,29 @@ router.post('/create', messengerAuth, async (req: MessengerAuthenticatedRequest,
     });
     if (!order) { res.status(404).json({ error: 'Order not found' }); return; }
     if (order.userId !== user.id) { res.status(403).json({ error: 'Access denied' }); return; }
+    if (order.paymentStatus === 'paid') { res.status(409).json({ error: 'Заказ уже оплачен' }); return; }
+    if (order.status === 'canceled') { res.status(409).json({ error: 'Заказ отменён' }); return; }
 
-    // Формируем позиции для чека
-    // Если есть промокод — применяем скидку пропорционально к каждой позиции
-    const originalItemsTotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const promoDiscount = order.promoDiscount || 0;
-
-    const paymentItems = order.items.map((item) => {
-      let price = item.price;
-      if (promoDiscount > 0 && originalItemsTotal > 0) {
-        // Применяем 10% скидку к цене единицы
-        price = Math.round(item.price * (1 - promoDiscount / originalItemsTotal));
-      }
-      return {
-        name: item.name,
-        price,
-        quantity: item.quantity,
-      };
-    });
-
-    // Если есть доставка — добавляем как отдельную позицию
-    const discountedItemsTotal = paymentItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const deliveryCost = order.totalPrice - discountedItemsTotal + (order.bonusUsed || 0);
-    if (deliveryCost > 0) {
-      paymentItems.push({
-        name: 'Доставка',
-        price: deliveryCost,
-        quantity: 1,
-      });
-    }
-
-    const payment = await createPayment(
-      order.totalPrice,
-      orderId,
-      `Заказ #${orderId} — Роза цветов`,
-      paymentItems,
-      undefined,
-      returnUrl,
-    );
-
-    await prisma.order.update({
-      where: { id: orderId },
-      data: { paymentId: payment.id },
-    });
+    const payment = await getOrCreatePayment(order, safeReturnUrl(req.body.returnUrl));
 
     res.json({ confirmationUrl: payment.confirmationUrl, paymentId: payment.id });
   } catch (error) {
+    if (error instanceof PaymentConflict) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
     console.error('Payment error:', error);
-    res.status(500).json({ error: 'Failed to create payment' });
+    res.status(500).json({ error: 'Не удалось создать платёж. Попробуйте ещё раз или позвоните нам.' });
   }
 });
 
 // POST /api/payment/webhook — ЮKassa webhook
-// TODO: Add YuKassa IP allowlist or signature verification for production security
-// Fix 2.2: Safer body parsing + Fix 2.3: Transaction for bonus earn
+// The body is only a hint which payment changed: its state is always re-read from the YooKassa API,
+// so a forged request cannot mark an order as paid.
 router.post('/webhook', async (req: Request, res: Response) => {
+  let body: any;
   try {
     // Parse body (may be raw Buffer from express.raw middleware)
-    let body: any;
     if (Buffer.isBuffer(req.body)) {
       body = JSON.parse(req.body.toString('utf-8'));
     } else if (typeof req.body === 'string') {
@@ -96,127 +61,31 @@ router.post('/webhook', async (req: Request, res: Response) => {
     } else {
       body = req.body;
     }
+  } catch {
+    res.json({ success: true });
+    return;
+  }
 
-    const event = body.event;
-    const paymentData = body.object;
+  const paymentId = body?.object?.id;
+  if (typeof paymentId !== 'string' || !['payment.succeeded', 'payment.canceled'].includes(body?.event)) {
+    res.json({ success: true });
+    return;
+  }
 
-    if (!paymentData?.metadata?.orderId) {
+  try {
+    const payment = await fetchPayment(paymentId);
+    if (!payment) {
+      console.warn(`Webhook for a payment unknown to YooKassa: ${paymentId}`);
       res.json({ success: true });
       return;
     }
 
-    const orderId = parseInt(String(paymentData.metadata.orderId));
-    if (isNaN(orderId)) {
-      res.json({ success: true });
-      return;
-    }
-
-    // Fix 2.3: Wrap bonus earn in transaction + idempotency check
-    if (event === 'payment.succeeded') {
-      // Idempotency: skip if already paid (YuKassa may retry webhooks)
-      const existingOrder = await prisma.order.findUnique({ where: { id: orderId }, select: { paymentStatus: true } });
-      if (existingOrder?.paymentStatus === 'paid') {
-        res.json({ success: true });
-        return;
-      }
-
-      const order = await prisma.$transaction(async (tx) => {
-        const updatedOrder = await tx.order.update({
-          where: { id: orderId },
-          data: { paymentStatus: 'paid', status: 'confirmed' },
-        });
-
-        if (updatedOrder.bonusEarned > 0) {
-          await tx.user.update({
-            where: { id: updatedOrder.userId },
-            data: { bonusPoints: { increment: updatedOrder.bonusEarned } },
-          });
-          await tx.loyaltyHistory.create({
-            data: {
-              userId: updatedOrder.userId,
-              amount: updatedOrder.bonusEarned,
-              type: 'earn',
-              description: `Кэшбэк за заказ #${updatedOrder.id}`,
-              orderId: updatedOrder.id,
-            },
-          });
-        }
-
-        return updatedOrder;
-      });
-
-      // Load full order details for notification
-      const fullOrder = await prisma.order.findUnique({
-        where: { id: order.id },
-        include: {
-          items: true,
-          address: true,
-        },
-      });
-
-      // Notify client about successful payment (dispatches to correct platform)
-      try {
-        const items = fullOrder?.items || [];
-        const address = fullOrder?.address;
-        await notifyPaymentSuccess(
-          order.userId,
-          order.id,
-          order.totalPrice,
-          order.bonusEarned,
-          items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity })),
-          order.deliveryType,
-          order.deliveryDate || undefined,
-          order.deliveryTime || undefined,
-          address ? `${address.street}, ${address.house}${address.apartment ? ', кв. ' + address.apartment : ''}` : undefined,
-          order.recipientName || undefined,
-        );
-      } catch (e) {
-        console.error('Failed to notify client about payment:', e);
-      }
-
-      // Notify admin about payment with full order details
-      try {
-        const items = fullOrder?.items || [];
-        const address = fullOrder?.address;
-        // Determine platform from user
-        const orderUser = await prisma.user.findUnique({
-          where: { id: order.userId },
-          select: { telegramId: true, maxId: true, firstName: true, lastName: true },
-        });
-        const platform = orderUser?.maxId && !orderUser?.telegramId ? 'max' : 'telegram';
-        const customerName = orderUser ? `${orderUser.firstName || ''}${orderUser.lastName ? ' ' + orderUser.lastName : ''}`.trim() || 'Клиент' : 'Клиент';
-
-        await notifyAdminPayment(
-          order.id,
-          order.totalPrice,
-          items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity })),
-          order.deliveryType || undefined,
-          order.deliveryDate || undefined,
-          order.deliveryTime || undefined,
-          address ? `${address.street}, ${address.house}${address.apartment ? ', кв. ' + address.apartment : ''}` : undefined,
-          order.recipientName || undefined,
-          customerName,
-          platform,
-          order.bonusEarned,
-          order.recipientPhone || undefined,
-          order.bonusUsed,
-        );
-      } catch (e) {
-        console.error('Failed to notify admin about payment:', e);
-      }
-    }
-
-    if (event === 'payment.canceled') {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { paymentStatus: 'canceled' },
-      });
-    }
-
+    await applyPaymentState(payment);
     res.json({ success: true });
   } catch (error) {
+    // A non-200 answer makes YooKassa repeat the notification later
     console.error('Webhook error:', error);
-    res.status(200).json({ success: true }); // Always respond 200 to webhook
+    res.status(500).json({ success: false });
   }
 });
 

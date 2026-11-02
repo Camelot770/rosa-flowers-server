@@ -11,8 +11,8 @@
  *   2. Find or create a guest User by phone (no telegramId, no maxId).
  *      Phone is normalized to E.164-ish "+7XXXXXXXXXX".
  *   3. Optionally create an Address linked to that user.
- *   4. Create the Order with paymentStatus="pending" (no payment yet —
- *      M4 will add /api/payment/create-guest).
+ *   4. Create the Order with paymentStatus="pending" and a random guestToken
+ *      that /api/payment/create-guest requires.
  *   5. Notify admin (Telegram) via the existing notifyAdminNewOrder.
  *
  * Mount in src/index.ts:
@@ -23,25 +23,20 @@
  * The order is fine after the existing `app.use('/api/orders', orderRoutes)`
  * — Express keeps trying matchers until one handles the request, and the
  * existing router doesn't define POST /guest.
+ *
+ * Error messages of this route are shown to site visitors as they are.
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../index';
 import { notifyAdminNewOrder } from '../notifications';
+import { applyPromo, assertMinOrder, cleanText, getOrderSettings, OrderError, priceItems } from '../services/orderPricing';
+import { syncOrderPayment } from '../services/payments';
 
 const router = Router();
 
 /* ----------------------------- helpers ----------------------------- */
-
-interface GuestOrderItem {
-  bouquetId?: number;
-  quantity: number;
-  // Names/prices are recomputed from DB; the client value is ignored.
-  // We still accept `name`/`price` so the client can show a confirmation
-  // without re-fetching, but never trust them.
-  name?: string;
-  price?: number;
-}
 
 interface GuestOrderBody {
   customer: {
@@ -70,9 +65,8 @@ interface GuestOrderBody {
   cardText?: string;
   comment?: string;
   promoCode?: string;
-  items: GuestOrderItem[];
-  // M4 will add returnUrl + redirect into payment. For M3 we just create
-  // the order and the studio calls back.
+  // Names/prices are recomputed from DB; the client value is ignored.
+  items: unknown;
 }
 
 /**
@@ -104,107 +98,45 @@ router.post('/guest', async (req: Request, res: Response) => {
 
     /* ----- 1. Validate ----- */
     if (!body?.customer || typeof body.customer !== 'object') {
-      res.status(400).json({ error: 'Missing customer' });
-      return;
+      throw new OrderError('Укажите контактные данные');
     }
     const firstName = String(body.customer.firstName || '').trim();
     if (firstName.length < 2 || firstName.length > 60) {
-      res.status(400).json({ error: 'Invalid firstName' });
-      return;
+      throw new OrderError('Укажите имя, от 2 до 60 символов');
     }
     const phone = normalizePhone(String(body.customer.phone || ''));
     if (!isValidPhone(phone)) {
-      res.status(400).json({ error: 'Invalid phone' });
-      return;
+      throw new OrderError('Проверьте номер телефона');
     }
-    if (body.customer.email && !isValidEmail(body.customer.email)) {
-      res.status(400).json({ error: 'Invalid email' });
-      return;
+    const email = cleanText(body.customer.email, 254);
+    if (email && !isValidEmail(email)) {
+      throw new OrderError('Проверьте адрес электронной почты');
     }
 
     if (!body.delivery || !['delivery', 'pickup'].includes(body.delivery.type)) {
-      res.status(400).json({ error: 'Invalid delivery type' });
-      return;
+      throw new OrderError('Выберите способ получения');
     }
-    if (body.delivery.type === 'delivery') {
-      if (!body.delivery.address?.street || !body.delivery.address?.house) {
-        res.status(400).json({ error: 'Address street and house are required for delivery' });
-        return;
-      }
-    }
-
-    if (!Array.isArray(body.items) || body.items.length === 0) {
-      res.status(400).json({ error: 'Cart is empty' });
-      return;
-    }
-    for (const item of body.items) {
-      if (!item.bouquetId || !Number.isFinite(item.bouquetId)) {
-        res.status(400).json({ error: 'Each item needs a bouquetId' });
-        return;
-      }
-      if (!Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 50) {
-        res.status(400).json({ error: 'Invalid item quantity' });
-        return;
-      }
+    const street = cleanText(body.delivery.address?.street, 200);
+    const house = cleanText(body.delivery.address?.house, 50);
+    if (body.delivery.type === 'delivery' && (!street || !house)) {
+      throw new OrderError('Укажите улицу и дом для доставки');
     }
 
     /* ----- 2. Recompute prices from DB (never trust client) ----- */
-    const ids = body.items.map((i) => i.bouquetId!);
-    const bouquets = await prisma.bouquet.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, name: true, price: true, inStock: true },
-    });
-    const byId = new Map(bouquets.map((b) => [b.id, b]));
-
-    const lineItems: Array<{ bouquetId: number; name: string; price: number; quantity: number }> = [];
-    let productSubtotal = 0;
-    for (const it of body.items) {
-      const b = byId.get(it.bouquetId!);
-      if (!b) {
-        res.status(400).json({ error: `Bouquet ${it.bouquetId} not found` });
-        return;
-      }
-      if (!b.inStock) {
-        res.status(400).json({ error: `Bouquet ${b.name} is out of stock` });
-        return;
-      }
-      lineItems.push({
-        bouquetId: b.id,
-        name: b.name,
-        price: b.price,
-        quantity: it.quantity,
-      });
-      productSubtotal += b.price * it.quantity;
-    }
+    const { lines: lineItems, subtotal: productSubtotal } = await priceItems(body.items);
 
     /* ----- 3. Promo + delivery ----- */
-    let promoDiscount = 0;
-    let validPromoCode: string | null = null;
-    if (body.promoCode && typeof body.promoCode === 'string') {
-      const code = body.promoCode.trim().toUpperCase();
-      if (code === 'VISITKA10') {
-        promoDiscount = Math.floor(productSubtotal * 0.1);
-        validPromoCode = code;
-      }
-    }
+    const settings = await getOrderSettings();
+    assertMinOrder(productSubtotal, settings.minOrder);
 
-    const settings = await prisma.setting.findMany({
-      where: { key: { in: ['delivery_price', 'free_delivery_from'] } },
-    });
-    const deliveryPrice = parseInt(
-      settings.find((s) => s.key === 'delivery_price')?.value || '500',
-      10,
-    );
-    const freeFrom = parseInt(
-      settings.find((s) => s.key === 'free_delivery_from')?.value || '5000',
-      10,
-    );
+    const { promoCode: validPromoCode, promoDiscount } = applyPromo(body.promoCode, productSubtotal);
 
     let totalPrice = productSubtotal - promoDiscount;
-    if (body.delivery.type === 'delivery' && productSubtotal < freeFrom) {
-      totalPrice += deliveryPrice;
-    }
-    if (totalPrice < 0) totalPrice = 0;
+    const deliveryPrice =
+      body.delivery.type === 'delivery' && productSubtotal < settings.freeDeliveryFrom
+        ? settings.deliveryPrice
+        : 0;
+    totalPrice += deliveryPrice;
 
     /* ----- 4. Find or create guest user + address ----- */
     // We can't use phone as a unique key because the schema only has telegramId/maxId
@@ -216,7 +148,7 @@ router.post('/guest', async (req: Request, res: Response) => {
       user = await prisma.user.create({
         data: {
           firstName,
-          lastName: body.customer.lastName?.trim() || null,
+          lastName: cleanText(body.customer.lastName, 60),
           phone,
           // No telegramId / maxId — this marks the user as a web guest.
         },
@@ -229,31 +161,37 @@ router.post('/guest', async (req: Request, res: Response) => {
     }
 
     let addressId: number | null = null;
-    if (body.delivery.type === 'delivery' && body.delivery.address) {
+    let addressLine: string | undefined;
+    if (body.delivery.type === 'delivery' && street && house) {
+      const city = cleanText(body.delivery.address?.city, 100);
+      const apartment = cleanText(body.delivery.address?.apartment, 20);
       const addr = await prisma.address.create({
         data: {
           userId: user.id,
-          title: body.delivery.address.city
-            ? `${body.delivery.address.city}, ${body.delivery.address.street}`
-            : body.delivery.address.street,
-          street: body.delivery.address.street,
-          house: body.delivery.address.house,
-          apartment: body.delivery.address.apartment || null,
-          entrance: body.delivery.address.entrance || null,
-          floor: body.delivery.address.floor || null,
-          comment: body.delivery.address.comment || null,
+          title: city ? `${city}, ${street}` : street,
+          street,
+          house,
+          apartment,
+          entrance: cleanText(body.delivery.address?.entrance, 20),
+          floor: cleanText(body.delivery.address?.floor, 20),
+          comment: cleanText(body.delivery.address?.comment, 500),
         },
       });
       addressId = addr.id;
+      addressLine = `${city ? city + ', ' : ''}${street}, ${house}${apartment ? ', кв. ' + apartment : ''}`;
     }
 
     /* ----- 5. Create order + items in a transaction ----- */
+    const customerComment = cleanText(body.comment, 1000);
     const commentBody = [
-      body.customer.email ? `Email: ${body.customer.email}` : null,
-      body.comment ? `Комментарий: ${body.comment}` : null,
+      email ? `Email: ${email}` : null,
+      customerComment ? `Комментарий: ${customerComment}` : null,
     ]
       .filter(Boolean)
       .join('\n');
+
+    const recipientName = cleanText(body.recipientName, 100);
+    const recipientPhone = cleanText(body.recipientPhone, 32);
 
     const order = await prisma.order.create({
       data: {
@@ -261,17 +199,19 @@ router.post('/guest', async (req: Request, res: Response) => {
         addressId,
         status: 'new',
         deliveryType: body.delivery.type,
-        deliveryDate: body.delivery.date || null,
-        deliveryTime: body.delivery.time || null,
-        recipientName: body.recipientName || `${firstName}`,
-        recipientPhone: body.recipientPhone || phone,
+        deliveryDate: cleanText(body.delivery.date, 32),
+        deliveryTime: cleanText(body.delivery.time, 32),
+        recipientName: recipientName || `${firstName}`,
+        recipientPhone: recipientPhone || phone,
         comment: commentBody || null,
         totalPrice,
         promoCode: validPromoCode,
         promoDiscount,
         paymentStatus: 'pending',
-        isAnonymous: !!body.isAnonymous,
-        cardText: body.cardText || null,
+        guestToken: crypto.randomBytes(16).toString('hex'),
+        customerEmail: email,
+        isAnonymous: body.isAnonymous === true,
+        cardText: cleanText(body.cardText, 1000),
         items: { create: lineItems },
       },
       include: { items: true },
@@ -279,9 +219,6 @@ router.post('/guest', async (req: Request, res: Response) => {
 
     /* ----- 6. Notify admin (best-effort) ----- */
     try {
-      const addressLine = body.delivery.address
-        ? `${body.delivery.address.street}, ${body.delivery.address.house}${body.delivery.address.apartment ? ', кв. ' + body.delivery.address.apartment : ''}`
-        : undefined;
       await notifyAdminNewOrder(
         order.id,
         `${firstName}${body.customer.lastName ? ' ' + body.customer.lastName : ''} · ${phone} · web-shop`,
@@ -290,11 +227,11 @@ router.post('/guest', async (req: Request, res: Response) => {
         body.delivery.type,
         order.items.map((it) => ({ name: it.name, quantity: it.quantity, price: it.price })),
         'web',
-        body.delivery.date || undefined,
-        body.delivery.time || undefined,
+        order.deliveryDate || undefined,
+        order.deliveryTime || undefined,
         addressLine,
-        body.recipientName || undefined,
-        body.recipientPhone || phone,
+        recipientName || undefined,
+        recipientPhone || phone,
       );
     } catch (e) {
       console.error('Admin notification failed for guest order:', e);
@@ -303,28 +240,43 @@ router.post('/guest', async (req: Request, res: Response) => {
     /* ----- 7. Respond ----- */
     res.status(201).json({
       orderId: order.id,
+      guestToken: order.guestToken,
       totalPrice,
       productSubtotal,
-      deliveryPrice: body.delivery.type === 'delivery' && productSubtotal < freeFrom ? deliveryPrice : 0,
+      deliveryPrice,
       promoDiscount,
       paymentStatus: order.paymentStatus,
     });
   } catch (error) {
+    if (error instanceof OrderError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     console.error('Guest order error:', error);
-    res.status(500).json({ error: 'Failed to create guest order' });
+    res.status(500).json({ error: 'Не удалось создать заказ. Попробуйте ещё раз или позвоните нам.' });
   }
 });
 
 /**
  * GET /api/orders/:id/status — minimal public status check.
  *
- * Used by the web /thank-you page to show "paid" / "pending" / "canceled"
- * after the user returns from YooKassa. Returns only non-sensitive fields.
+ * Used by the web /thank-you page and the mini-apps' /paid page to show
+ * "paid" / "pending" / "canceled" after the user returns from YooKassa.
+ * Returns only non-sensitive fields.
  *
  * Anyone with an orderId can call this, so we deliberately omit PII (name,
  * phone, address). A guessing attacker can only learn the public status of
  * an arbitrary order — acceptable trade-off for UX.
  */
+const STATUS_FIELDS = {
+  id: true,
+  status: true,
+  paymentStatus: true,
+  totalPrice: true,
+  createdAt: true,
+  deliveryType: true,
+} as const;
+
 router.get('/:id/status', async (req: Request, res: Response) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -332,22 +284,18 @@ router.get('/:id/status', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid order ID' });
       return;
     }
-    const order = await prisma.order.findUnique({
+    const current = await prisma.order.findUnique({
       where: { id },
-      select: {
-        id: true,
-        status: true,
-        paymentStatus: true,
-        totalPrice: true,
-        createdAt: true,
-        deliveryType: true,
-      },
+      select: { id: true, paymentId: true, paymentStatus: true },
     });
-    if (!order) {
+    if (!current) {
       res.status(404).json({ error: 'Order not found' });
       return;
     }
-    res.json(order);
+
+    await syncOrderPayment(current);
+
+    res.json(await prisma.order.findUnique({ where: { id }, select: STATUS_FIELDS }));
   } catch (error) {
     console.error('Guest order status error:', error);
     res.status(500).json({ error: 'Failed to fetch order status' });
