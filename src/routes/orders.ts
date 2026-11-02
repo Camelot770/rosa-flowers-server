@@ -97,7 +97,7 @@ router.post('/', messengerAuth, async (req: MessengerAuthenticatedRequest, res: 
     const settings = await getOrderSettings();
     assertMinOrder(productSubtotal, settings.minOrder);
 
-    const promo = applyPromo(promoCode, productSubtotal);
+    const promo = await applyPromo(promoCode, productSubtotal, { id: user.id });
     let totalPrice = productSubtotal - promo.promoDiscount;
 
     // Validate bonus usage

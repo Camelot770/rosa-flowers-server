@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../index';
 import { messengerAuth, MessengerAuthenticatedRequest } from '../middleware/messengerAuth';
-import { cleanText } from '../services/orderPricing';
+import { cleanText, isPromoAvailable } from '../services/orderPricing';
 
 const router = Router();
 
@@ -46,7 +46,7 @@ router.get('/profile', messengerAuth, async (req: MessengerAuthenticatedRequest,
       },
     });
 
-    res.json(user);
+    res.json({ ...user, promoAvailable: await isPromoAvailable({ id: user.id }) });
   } catch (error) {
     console.error('Error in user profile:', error);
     res.status(500).json({ error: 'Failed to get profile' });

@@ -1,7 +1,9 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../index';
 
 const MAX_QUANTITY = 50;
 const MAX_LINES = 50;
+const PROMO_CODE = 'VISITKA10';
 
 // An order problem whose message is safe to show to the customer
 export class OrderError extends Error {
@@ -81,12 +83,32 @@ export function assertMinOrder(subtotal: number, minOrder: number): void {
   }
 }
 
+// The promo code is for a first order. A canceled order does not use it up, and neither does an unpaid one:
+// a customer may come back after a failed payment and order again.
+export async function isPromoAvailable(customer: Prisma.UserWhereInput): Promise<boolean> {
+  const earlier = await prisma.order.count({
+    where: {
+      user: customer,
+      status: { not: 'canceled' },
+      OR: [{ paymentStatus: 'paid' }, { status: { not: 'new' } }],
+    },
+  });
+  return earlier === 0;
+}
+
 // Promo code validation (server-side)
-export function applyPromo(promoCode: unknown, subtotal: number): { promoCode: string | null; promoDiscount: number } {
-  if (typeof promoCode === 'string' && promoCode.trim().toUpperCase() === 'VISITKA10') {
-    return { promoCode: 'VISITKA10', promoDiscount: Math.floor(subtotal * 0.1) }; // 10% off
+export async function applyPromo(
+  promoCode: unknown,
+  subtotal: number,
+  customer: Prisma.UserWhereInput,
+): Promise<{ promoCode: string | null; promoDiscount: number }> {
+  if (typeof promoCode !== 'string' || promoCode.trim().toUpperCase() !== PROMO_CODE) {
+    return { promoCode: null, promoDiscount: 0 };
   }
-  return { promoCode: null, promoDiscount: 0 };
+  if (!(await isPromoAvailable(customer))) {
+    throw new OrderError(`Промокод ${PROMO_CODE} действует только на первый заказ. Уберите его, чтобы оформить заказ.`);
+  }
+  return { promoCode: PROMO_CODE, promoDiscount: Math.floor(subtotal * 0.1) }; // 10% off
 }
 
 // Trimmed string limited in length, or null when empty or not a string

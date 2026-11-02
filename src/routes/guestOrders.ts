@@ -130,7 +130,11 @@ router.post('/guest', async (req: Request, res: Response) => {
     const settings = await getOrderSettings();
     assertMinOrder(productSubtotal, settings.minOrder);
 
-    const { promoCode: validPromoCode, promoDiscount } = applyPromo(body.promoCode, productSubtotal);
+    const { promoCode: validPromoCode, promoDiscount } = await applyPromo(body.promoCode, productSubtotal, {
+      phone,
+      telegramId: null,
+      maxId: null,
+    });
 
     let totalPrice = productSubtotal - promoDiscount;
     const deliveryPrice =
