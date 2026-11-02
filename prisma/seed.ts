@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
@@ -16,7 +17,11 @@ async function main() {
   console.log('📦 Empty database detected — running initial seed...');
 
   // Admin user
-  const hashedPassword = await bcrypt.hash('admin123', 10);
+  const adminPassword = process.env.ADMIN_PASSWORD || randomBytes(12).toString('base64url');
+  if (!process.env.ADMIN_PASSWORD) {
+    console.log(`🔑 Admin password (shown once, change it in the admin panel): ${adminPassword}`);
+  }
+  const hashedPassword = await bcrypt.hash(adminPassword, 10);
   await prisma.adminUser.upsert({
     where: { login: 'admin' },
     update: {},

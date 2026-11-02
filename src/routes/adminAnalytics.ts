@@ -55,12 +55,13 @@ router.get('/', async (_req: AdminRequest, res: Response) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const revenueByDay = await prisma.$queryRawUnsafe<{ date: string; revenue: number }[]>(
-      `SELECT DATE(createdAt) as date, SUM(totalPrice) as revenue
+      // Prisma stores DateTime in SQLite as integer milliseconds
+      `SELECT DATE(createdAt / 1000, 'unixepoch', '+3 hours') as date, SUM(totalPrice) as revenue
        FROM "Order"
        WHERE paymentStatus = 'paid' AND createdAt >= ?
-       GROUP BY DATE(createdAt)
+       GROUP BY date
        ORDER BY date ASC`,
-      thirtyDaysAgo.toISOString()
+      thirtyDaysAgo.getTime()
     );
 
     // Recent orders

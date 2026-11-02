@@ -34,7 +34,8 @@ COPY --from=builder /app/dist-seed ./dist-seed/
 RUN mkdir -p /data/uploads/bouquets /data/uploads/constructor /data/uploads/gallery
 
 ENV DATABASE_URL=file:/data/rosa.db
+ENV UPLOADS_DIR=/data/uploads
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist-seed/seed.js && node dist/index.js"]
+CMD ["sh", "-c", "echo '[boot] container started' && npx prisma db push --skip-generate && echo '[boot] schema ready' && node dist-seed/seed.js && echo '[boot] seed done' && exec node dist/index.js"]

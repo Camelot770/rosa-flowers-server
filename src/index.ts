@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
 import { PrismaClient } from '@prisma/client';
 
 // Routes
@@ -29,13 +30,14 @@ import { startBot } from './bot';
 import { startMaxBot } from './maxBot';
 
 // One-time data migrations that run at server boot (idempotent)
-import { applyBouquetRenames } from './startup/applyBouquetRenames';
-import { applyBouquetRenamesV2 } from './startup/applyBouquetRenamesV2';
-import { applyBouquetRenamesV3 } from './startup/applyBouquetRenamesV3';
+import { runStartupTasks } from './startup/runStartupTasks';
 
 export const prisma = new PrismaClient();
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
+
+// The app runs behind one reverse proxy; rate limits need the real client IP
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(cors({
@@ -49,7 +51,29 @@ app.use(express.json());
 
 // Static files — uploads
 const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
-app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', express.static(uploadsDir, {
+  setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+}));
+
+// Rate limits for routes open to anyone
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' },
+});
+const guestLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много запросов. Попробуйте через несколько минут.' },
+});
+app.use('/api/admin/auth/login', loginLimiter);
+app.use('/api/orders/guest', guestLimiter);
+app.use('/api/payment/create-guest', guestLimiter);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -84,7 +108,12 @@ app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/broadcast', adminBroadcastRoutes);
 
 // Global error handler
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // Client errors from middleware, for example malformed JSON
+  if (err.status && err.status >= 400 && err.status < 500) {
+    res.status(err.status).json({ error: 'Bad request' });
+    return;
+  }
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
@@ -94,9 +123,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Rosa Flowers server running on port ${PORT}`);
   startBot().catch(err => console.error('Telegram bot startup failed:', err));
   startMaxBot().catch(err => console.error('Max bot startup failed:', err));
-  applyBouquetRenames().catch(err => console.error('Bouquet rename startup task failed:', err));
-  applyBouquetRenamesV2().catch(err => console.error('Bouquet rename v2 startup task failed:', err));
-  applyBouquetRenamesV3().catch(err => console.error('Bouquet rename v3 startup task failed:', err));
+  runStartupTasks().catch(err => console.error('Startup tasks failed:', err));
 });
 
 // Graceful shutdown

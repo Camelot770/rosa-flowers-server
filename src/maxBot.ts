@@ -2,6 +2,8 @@ import { Bot, Context } from '@maxhub/max-bot-api';
 
 let maxBot: Bot | null = null;
 
+const MAX_POLLING_RESTART_MS = 5000;
+
 export function getMaxBot(): Bot | null {
   return maxBot;
 }
@@ -97,12 +99,21 @@ export async function startMaxBot() {
     }
   });
 
-  try {
-    await maxBot.start();
-    console.log('Max bot started');
-  } catch (err: any) {
-    console.error(`Max bot startup failed: ${err.message || err}`);
-    maxBot = null;
+  // A failing handler (for example a chat that blocked the bot) must not stop polling
+  maxBot.catch((err: unknown) => console.error('Max bot handler error:', err));
+
+  // The library's polling ends quietly after a single 429 or 5xx and rejects on a network failure.
+  // Keep it running: notifications go through this bot, so it stays set either way.
+  console.log('Max bot started');
+  for (;;) {
+    try {
+      await maxBot.start();
+      console.warn('Max bot polling stopped, restarting');
+    } catch (err: any) {
+      console.error(`Max bot polling failed: ${err.message || err}`);
+    }
+    maxBot.stop();
+    await new Promise((resolve) => setTimeout(resolve, MAX_POLLING_RESTART_MS));
   }
 }
 

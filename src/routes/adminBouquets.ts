@@ -171,7 +171,8 @@ router.put('/:id', handleUpload('images', 10), async (req: AdminRequest, res: Re
           inStock: inStock !== 'false',
           isHit: isHit === 'true',
           isNew: isNew === 'true',
-          isFeatured: makeFeatured,
+          // A form that did not change the flag leaves it out, so a stale form cannot overwrite it
+          isFeatured: isFeatured === undefined ? undefined : makeFeatured,
           customOrder: customOrder === 'true',
           sortOrder: Math.max(0, parseInt(sortOrder) || 0),
           images: files?.length ? {

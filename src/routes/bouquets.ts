@@ -16,16 +16,19 @@ function parseTags(bouquet: any) {
 // GET /api/bouquets — список всех букетов
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, search, sort, isHit, isNew, featured, priceMin, priceMax } = req.query;
+    const { category, search, sort, isHit, isNew, featured, priceMin, priceMax, minPrice, maxPrice } = req.query;
 
     const where: any = { inStock: true };
     if (category && category !== 'all') {
       where.category = category as string;
     }
-    if (priceMin || priceMax) {
+    // minPrice/maxPrice are what older mini-app builds send
+    const min = parseInt(String(priceMin ?? minPrice));
+    const max = parseInt(String(priceMax ?? maxPrice));
+    if (!isNaN(min) || !isNaN(max)) {
       where.price = {};
-      if (priceMin) where.price.gte = parseInt(priceMin as string);
-      if (priceMax) where.price.lte = parseInt(priceMax as string);
+      if (!isNaN(min)) where.price.gte = min;
+      if (!isNaN(max)) where.price.lte = max;
     }
     if (isHit === 'true') {
       where.isHit = true;
@@ -35,12 +38,6 @@ router.get('/', async (req: Request, res: Response) => {
     }
     if (featured === 'true') {
       where.isFeatured = true;
-    }
-    if (search) {
-      where.OR = [
-        { name: { contains: search as string } },
-        { description: { contains: search as string } },
-      ];
     }
 
     let orderBy: any = { sortOrder: 'asc' };
@@ -54,7 +51,13 @@ router.get('/', async (req: Request, res: Response) => {
       include: { images: { orderBy: { sortOrder: 'asc' } } },
     });
 
-    res.json(bouquets.map(parseTags));
+    // Filtered here because SQLite LIKE ignores case for ASCII only, so "соната" would miss "Соната"
+    const query = typeof search === 'string' ? search.trim().toLowerCase() : '';
+    const found = query
+      ? bouquets.filter((b) => b.name.toLowerCase().includes(query) || b.description.toLowerCase().includes(query))
+      : bouquets;
+
+    res.json(found.map(parseTags));
   } catch (error) {
     console.error('Error fetching bouquets:', error);
     res.status(500).json({ error: 'Failed to fetch bouquets' });
