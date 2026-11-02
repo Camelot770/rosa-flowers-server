@@ -67,7 +67,7 @@ router.get('/:id', async (req: AdminRequest, res: Response) => {
 // POST /api/admin/bouquets — создать букет
 router.post('/', handleUpload('images', 10), async (req: AdminRequest, res: Response) => {
   try {
-    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, customOrder, sortOrder } = req.body;
+    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, isFeatured, customOrder, sortOrder } = req.body;
     const files = req.files as Express.Multer.File[];
 
     const parsedPrice = parseInt(price);
@@ -81,29 +81,37 @@ router.post('/', handleUpload('images', 10), async (req: AdminRequest, res: Resp
       return;
     }
 
-    const bouquet = await prisma.bouquet.create({
-      data: {
-        name,
-        description,
-        price: parsedPrice,
-        oldPrice: parsedOldPrice,
-        category: category || 'bouquets',
-        tags: tags
-          ? JSON.stringify(tags.split(',').map((t: string) => t.trim()).filter(Boolean))
-          : '[]',
-        inStock: inStock !== 'false',
-        isHit: isHit === 'true',
-        isNew: isNew === 'true',
-        customOrder: customOrder === 'true',
-        sortOrder: Math.max(0, parseInt(sortOrder) || 0),
-        images: {
-          create: files?.map((f, i) => ({
-            url: `/uploads/${f.filename}`,
-            sortOrder: i,
-          })) || [],
+    const makeFeatured = isFeatured === 'true';
+
+    const bouquet = await prisma.$transaction(async (tx) => {
+      if (makeFeatured) {
+        await tx.bouquet.updateMany({ where: { isFeatured: true }, data: { isFeatured: false } });
+      }
+      return tx.bouquet.create({
+        data: {
+          name,
+          description,
+          price: parsedPrice,
+          oldPrice: parsedOldPrice,
+          category: category || 'bouquets',
+          tags: tags
+            ? JSON.stringify(tags.split(',').map((t: string) => t.trim()).filter(Boolean))
+            : '[]',
+          inStock: inStock !== 'false',
+          isHit: isHit === 'true',
+          isNew: isNew === 'true',
+          isFeatured: makeFeatured,
+          customOrder: customOrder === 'true',
+          sortOrder: Math.max(0, parseInt(sortOrder) || 0),
+          images: {
+            create: files?.map((f, i) => ({
+              url: `/uploads/${f.filename}`,
+              sortOrder: i,
+            })) || [],
+          },
         },
-      },
-      include: { images: true },
+        include: { images: true },
+      });
     });
 
     res.json(parseTags(bouquet));
@@ -118,7 +126,7 @@ router.put('/:id', handleUpload('images', 10), async (req: AdminRequest, res: Re
   try {
     const id = parseInt(String(req.params.id));
     if (isNaN(id)) { res.status(400).json({ error: 'Invalid bouquet ID' }); return; }
-    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, customOrder, sortOrder, deleteImages } = req.body;
+    const { name, description, price, oldPrice, category, tags, inStock, isHit, isNew, isFeatured, customOrder, sortOrder, deleteImages } = req.body;
     const files = req.files as Express.Multer.File[];
 
     const parsedPrice = parseInt(price);
@@ -143,30 +151,38 @@ router.put('/:id', handleUpload('images', 10), async (req: AdminRequest, res: Re
       }
     }
 
-    const bouquet = await prisma.bouquet.update({
-      where: { id },
-      data: {
-        name,
-        description,
-        price: parsedPrice,
-        oldPrice: parsedOldPrice,
-        category: category || 'bouquets',
-        tags: tags
-          ? JSON.stringify(tags.split(',').map((t: string) => t.trim()).filter(Boolean))
-          : '[]',
-        inStock: inStock !== 'false',
-        isHit: isHit === 'true',
-        isNew: isNew === 'true',
-        customOrder: customOrder === 'true',
-        sortOrder: Math.max(0, parseInt(sortOrder) || 0),
-        images: files?.length ? {
-          create: files.map((f, i) => ({
-            url: `/uploads/${f.filename}`,
-            sortOrder: i + 100,
-          })),
-        } : undefined,
-      },
-      include: { images: { orderBy: { sortOrder: 'asc' } } },
+    const makeFeatured = isFeatured === 'true';
+
+    const bouquet = await prisma.$transaction(async (tx) => {
+      if (makeFeatured) {
+        await tx.bouquet.updateMany({ where: { isFeatured: true, NOT: { id } }, data: { isFeatured: false } });
+      }
+      return tx.bouquet.update({
+        where: { id },
+        data: {
+          name,
+          description,
+          price: parsedPrice,
+          oldPrice: parsedOldPrice,
+          category: category || 'bouquets',
+          tags: tags
+            ? JSON.stringify(tags.split(',').map((t: string) => t.trim()).filter(Boolean))
+            : '[]',
+          inStock: inStock !== 'false',
+          isHit: isHit === 'true',
+          isNew: isNew === 'true',
+          isFeatured: makeFeatured,
+          customOrder: customOrder === 'true',
+          sortOrder: Math.max(0, parseInt(sortOrder) || 0),
+          images: files?.length ? {
+            create: files.map((f, i) => ({
+              url: `/uploads/${f.filename}`,
+              sortOrder: i + 100,
+            })),
+          } : undefined,
+        },
+        include: { images: { orderBy: { sortOrder: 'asc' } } },
+      });
     });
 
     res.json(parseTags(bouquet));
@@ -181,13 +197,15 @@ router.patch('/:id/toggle', async (req: AdminRequest, res: Response) => {
     const id = parseInt(String(req.params.id));
     if (isNaN(id)) { res.status(400).json({ error: 'Invalid bouquet ID' }); return; }
     const { field, value } = req.body;
-    if (!['inStock', 'isHit', 'isNew', 'customOrder'].includes(field) || typeof value !== 'boolean') {
+    if (!['inStock', 'isHit', 'isNew', 'isFeatured', 'customOrder'].includes(field) || typeof value !== 'boolean') {
       res.status(400).json({ error: 'Invalid field or value' });
       return;
     }
-    const bouquet = await prisma.bouquet.update({
-      where: { id },
-      data: { [field]: value },
+    const bouquet = await prisma.$transaction(async (tx) => {
+      if (field === 'isFeatured' && value === true) {
+        await tx.bouquet.updateMany({ where: { isFeatured: true, NOT: { id } }, data: { isFeatured: false } });
+      }
+      return tx.bouquet.update({ where: { id }, data: { [field]: value } });
     });
     res.json({ success: true, [field]: (bouquet as any)[field] });
   } catch (error) {

@@ -16,7 +16,7 @@ function parseTags(bouquet: any) {
 // GET /api/bouquets — список всех букетов
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, search, sort, isHit, isNew, priceMin, priceMax } = req.query;
+    const { category, search, sort, isHit, isNew, featured, priceMin, priceMax } = req.query;
 
     const where: any = { inStock: true };
     if (category && category !== 'all') {
@@ -32,6 +32,9 @@ router.get('/', async (req: Request, res: Response) => {
     }
     if (isNew === 'true') {
       where.isNew = true;
+    }
+    if (featured === 'true') {
+      where.isFeatured = true;
     }
     if (search) {
       where.OR = [
